@@ -27,7 +27,8 @@
 <ul>
 <li><strong>原生 MTP 的首位优势值得复用。</strong> 在相同目标模型和输入下，我们观察到 MTP 的首 token 接受率高于 DFlash。因此，我们让 MTP 生成首个候选，再由 DFlash 并行预测后六个候选。</li>
 <li><strong>通过隐藏状态，把 MTP 的预训练能力带给 DFlash。</strong> 我们不只让 MTP 生成首个候选，还把预测它时的隐藏状态与候选的词嵌入融合。这样，DFlash 在续写时既能看到具体的候选，也能利用 MTP 在预训练中学到的特征，帮助后续 token 的并行预测。</li>
-<li><strong>组合后的收益体现在完整生成中，也能与已有优化结合。</strong> 我们在六类任务上获得了 <strong>9.25%～19.56%</strong> 的接受长度提升；在 B32 的四类任务评测中，端到端吞吐提高了 <strong>17.10%～23.75%</strong>，均以 DFlash 为基线。DMTP 改进的是两者的协作方式，与 MTP、DFlash 各自的优化工作正交：更强的预测器、训练方法、候选选择策略和推理 kernel，都可以继续结合到这一框架中。</li>
+<li><strong>收益同时覆盖长文场景与开源短文评测。</strong> 在 Qwen3.6-35B-A3B 的六类任务上，DMTP 相对 DFlash 的接受长度提高 <strong>9.25%～19.56%</strong>，B32 端到端吞吐提高 <strong>17.10%～23.75%</strong>。在公开 Qwen3.6-27B 与 OpenPerfectBlend 上，我们也获得了 <strong>5.78%～21.55%</strong> 的接受长度提升，覆盖数学、代码与聊天任务。</li>
+<li><strong>与 MTP、DFlash 的优化正交。</strong> DMTP 改进的是两者的协作方式；更强的预测器、训练方法、候选选择策略和推理 kernel，都可以继续结合到这一框架中。</li>
 </ul>
 <h2 id="zh-section-1">1. 首位接受率与并行 Draft</h2>
 <p>图 1 比较同一目标模型上的 <strong>DFlash 与原生 MTP</strong>。DFlash 使用混合任务数据训练，训练长度为 32K；MTP 使用同一目标模型自带的预训练权重。首 token 接受率指每轮第一个候选被目标模型接受的比例。</p>
@@ -568,17 +569,19 @@ Target：验证七个候选，提交接受前缀与修正/bonus
 <p>评测使用四卡张量并行，批量上限为 32，温度为 0，每轮最多生成 1,024 个 token，遇结束符正常停止。我们统一使用目标模型的聊天模板，设置 <code>enable_thinking=False</code>，并沿用前文的 target-only 验证方式。</p>
 <p>OpenPerfectBlend 侧重数学与代码，因此我们除数学、代码任务外，也使用 Alpaca 和 MT-Bench 观察聊天场景下的表现。每个数据集取前 80 条；MT-Bench 保留完整双轮会话，第二轮使用各模型自身的第一轮回答。</p>
 <div class="table-scroll" tabindex="0"><table>
-<colgroup><col style="width:22%"><col style="width:22%"><col style="width:22%"><col style="width:34%"></colgroup>
-<thead><tr><th class="acceptance-dataset" scope="col">数据集</th><th class="acceptance-model" scope="col">原生 MTP415</th><th class="acceptance-model" scope="col">DFlash</th><th class="acceptance-model" scope="col">DMTP(DFLASH)</th></tr></thead>
-<tbody><tr><th scope="row">GSM8K</th><td class="model-start mtp415">4.373</td><td class="model-start dflash">4.318</td><td class="model-start dmtp"><strong>5.074</strong> <strong class="acceptance-gain">(+17.50%)</strong></td></tr>
-<tr><th scope="row">HumanEval</th><td class="model-start mtp415">4.698</td><td class="model-start dflash">6.424</td><td class="model-start dmtp"><strong>6.795</strong> <strong class="acceptance-gain">(+5.78%)</strong></td></tr>
-<tr><th scope="row">MATH500</th><td class="model-start mtp415">4.377</td><td class="model-start dflash">4.258</td><td class="model-start dmtp"><strong>4.968</strong> <strong class="acceptance-gain">(+16.67%)</strong></td></tr>
-<tr><th scope="row">Alpaca</th><td class="model-start mtp415"><strong>3.529</strong></td><td class="model-start dflash">2.763</td><td class="model-start dmtp">3.358 <strong class="acceptance-gain">(+21.55%)</strong></td></tr>
-<tr><th scope="row">MT-Bench</th><td class="model-start mtp415">3.599</td><td class="model-start dflash">3.209</td><td class="model-start dmtp"><strong>3.760</strong> <strong class="acceptance-gain">(+17.15%)</strong></td></tr></tbody>
+<colgroup><col style="width:20%"><col style="width:18%"><col style="width:16%"><col style="width:30%"><col style="width:16%"></colgroup>
+<thead><tr><th class="acceptance-dataset" scope="col">数据集</th><th class="acceptance-model" scope="col">原生 MTP415</th><th class="acceptance-model" scope="col">DFlash</th><th class="acceptance-model" scope="col">DMTP(DFLASH)</th><th class="acceptance-model" scope="col">DFlash2</th></tr></thead>
+<tbody><tr><th scope="row">GSM8K</th><td class="model-start mtp415">4.373</td><td class="model-start dflash">4.318</td><td class="model-start dmtp"><strong>5.074</strong> <strong class="acceptance-gain">(+17.50%)</strong></td><td class="model-start dflash2">4.595</td></tr>
+<tr><th scope="row">HumanEval</th><td class="model-start mtp415">4.698</td><td class="model-start dflash">6.424</td><td class="model-start dmtp"><strong>6.795</strong> <strong class="acceptance-gain">(+5.78%)</strong></td><td class="model-start dflash2">6.609</td></tr>
+<tr><th scope="row">MATH500</th><td class="model-start mtp415">4.377</td><td class="model-start dflash">4.258</td><td class="model-start dmtp"><strong>4.968</strong> <strong class="acceptance-gain">(+16.67%)</strong></td><td class="model-start dflash2">4.536</td></tr>
+<tr><th scope="row">Alpaca</th><td class="model-start mtp415"><strong>3.529</strong></td><td class="model-start dflash">2.763</td><td class="model-start dmtp">3.358 <strong class="acceptance-gain">(+21.55%)</strong></td><td class="model-start dflash2">2.990</td></tr>
+<tr><th scope="row">MT-Bench</th><td class="model-start mtp415">3.599</td><td class="model-start dflash">3.209</td><td class="model-start dmtp"><strong>3.760</strong> <strong class="acceptance-gain">(+17.15%)</strong></td><td class="model-start dflash2">3.535</td></tr></tbody>
 </table></div>
 
 
-<p>表中报告<strong>请求级平均接受长度（Per-request）</strong>，包含目标模型的修正或 bonus token；MT-Bench 的每轮生成分别计入。<strong class="acceptance-comparison">DMTP 相对 DFlash 的提升</strong>以红色括号标出。原生 MTP415 每轮提出四个候选，DFlash 与 DMTP 均为七个。</p>
+<p>在这组短输出评测中，DMTP 相对 DFlash 的请求级平均接受长度在五个数据集上均有提升：GSM8K 为 <strong>17.50%</strong>，HumanEval 为 <strong>5.78%</strong>，MATH500 为 <strong>16.67%</strong>，Alpaca 与 MT-Bench 分别为 <strong>21.55%</strong> 和 <strong>17.15%</strong>。</p>
+<p>表中报告<strong>请求级平均接受长度（Per-request）</strong>，包含目标模型的修正或 bonus token；MT-Bench 的每轮生成分别计入。<strong class="acceptance-comparison">DMTP(DFLASH) 相对 DFlash 的提升</strong>以红色括号标出；DFlash2 作为另一组基线，只报告接受长度。原生 MTP415 每轮提出四个候选，DFlash、DFlash2 与 DMTP 均为七个。</p>
+<p>表中的 DFlash、DFlash2 与 DMTP(DFLASH) 均使用 24,000 步 checkpoint。DFlash2 保留块内卷积和路径 selector；DMTP(DFLASH) 以普通 DFlash 为并行起草器，不是 DFlash2 与单 anchor 的组合。</p>
 <h2 id="zh-section-9">9. 后续方向</h2>
 <p><strong>DMTP 的一个局限，是它依赖原生 MTP 的首位预测能力。</strong> 如果 MTP 在某些场景下训练不够充分，它的首 token 接受率可能低于经过任务数据微调的 DFlash。这时，直接把首位交给 MTP 未必是更好的选择。我们还需要进一步探索这种差异，以及如何通过训练和两者的协作改善这些场景。</p>
 <p>我们还想继续探索几个方向：</p>
@@ -627,7 +630,8 @@ Target：验证七个候选，提交接受前缀与修正/bonus
 <ul>
 <li><strong>Native MTP&#39;s first-token advantage is worth reusing.</strong> With the same Target and inputs, we observe higher first-token acceptance from MTP than DFlash. We therefore use MTP for T1 and DFlash for the remaining six parallel proposals.</li>
 <li><strong>Pass MTP&#39;s pretrained capability to DFlash through hidden states.</strong> We use MTP not only to generate T1, but also to fuse the hidden state that predicted it with its token embedding. DFlash can then use both the concrete candidate and features learned during MTP pretraining to predict the continuation in parallel.</li>
-<li><strong>The combination improves generation and complements existing optimizations.</strong> We obtain <strong>9.25%–19.56%</strong> higher acceptance length across six workloads and <strong>17.10%–23.75%</strong> higher end-to-end throughput across four workloads at B32, both relative to DFlash. DMTP changes how the two models cooperate and is orthogonal to optimizations within MTP or DFlash: stronger predictors, training methods, candidate-selection strategies, and inference kernels can be combined with this framework.</li>
+<li><strong>The gains extend from long-context workloads to public short-output benchmarks.</strong> On Qwen3.6-35B-A3B, DMTP improves acceptance length by <strong>9.25%–19.56%</strong> across six workloads and B32 end-to-end throughput by <strong>17.10%–23.75%</strong>, relative to DFlash. With public Qwen3.6-27B weights and OpenPerfectBlend, we also obtain <strong>5.78%–21.55%</strong> higher acceptance length across math, code, and chat tasks.</li>
+<li><strong>DMTP complements optimizations within MTP and DFlash.</strong> We change how the two models cooperate; stronger predictors, training methods, candidate-selection strategies, and inference kernels can all be combined with this framework.</li>
 </ul>
 <h2 id="en-section-1">1. First-Token Acceptance and Parallel Drafting</h2>
 <p>Figure 1 compares <strong>DFlash and native MTP</strong> using the same target model. DFlash is trained on a mixture of tasks with 32K sequences; MTP uses the pretrained weights bundled with the same target. First-token acceptance is the fraction of rounds in which the target accepts the first proposed candidate.</p>
@@ -1168,17 +1172,19 @@ Target:  verify seven candidates and commit the accepted prefix plus correction/
 <p>We evaluate with four-way tensor parallelism, a batch limit of 32, temperature 0, and up to 1,024 output tokens per turn, stopping at EOS. All models use the target model&#39;s chat template with <code>enable_thinking=False</code> and the target-only verification described earlier.</p>
 <p>OpenPerfectBlend focuses on math and code, so we also evaluate chat using Alpaca and MT-Bench. We take the first 80 entries from each dataset; MT-Bench retains complete two-turn conversations, carrying each model&#39;s own first-turn response into the second turn.</p>
 <div class="table-scroll" tabindex="0"><table>
-<colgroup><col style="width:22%"><col style="width:22%"><col style="width:22%"><col style="width:34%"></colgroup>
-<thead><tr><th class="acceptance-dataset" scope="col">Dataset</th><th class="acceptance-model" scope="col">Native MTP415</th><th class="acceptance-model" scope="col">DFlash</th><th class="acceptance-model" scope="col">DMTP(DFLASH)</th></tr></thead>
-<tbody><tr><th scope="row">GSM8K</th><td class="model-start mtp415">4.373</td><td class="model-start dflash">4.318</td><td class="model-start dmtp"><strong>5.074</strong> <strong class="acceptance-gain">(+17.50%)</strong></td></tr>
-<tr><th scope="row">HumanEval</th><td class="model-start mtp415">4.698</td><td class="model-start dflash">6.424</td><td class="model-start dmtp"><strong>6.795</strong> <strong class="acceptance-gain">(+5.78%)</strong></td></tr>
-<tr><th scope="row">MATH500</th><td class="model-start mtp415">4.377</td><td class="model-start dflash">4.258</td><td class="model-start dmtp"><strong>4.968</strong> <strong class="acceptance-gain">(+16.67%)</strong></td></tr>
-<tr><th scope="row">Alpaca</th><td class="model-start mtp415"><strong>3.529</strong></td><td class="model-start dflash">2.763</td><td class="model-start dmtp">3.358 <strong class="acceptance-gain">(+21.55%)</strong></td></tr>
-<tr><th scope="row">MT-Bench</th><td class="model-start mtp415">3.599</td><td class="model-start dflash">3.209</td><td class="model-start dmtp"><strong>3.760</strong> <strong class="acceptance-gain">(+17.15%)</strong></td></tr></tbody>
+<colgroup><col style="width:20%"><col style="width:18%"><col style="width:16%"><col style="width:30%"><col style="width:16%"></colgroup>
+<thead><tr><th class="acceptance-dataset" scope="col">Dataset</th><th class="acceptance-model" scope="col">Native MTP415</th><th class="acceptance-model" scope="col">DFlash</th><th class="acceptance-model" scope="col">DMTP(DFLASH)</th><th class="acceptance-model" scope="col">DFlash2</th></tr></thead>
+<tbody><tr><th scope="row">GSM8K</th><td class="model-start mtp415">4.373</td><td class="model-start dflash">4.318</td><td class="model-start dmtp"><strong>5.074</strong> <strong class="acceptance-gain">(+17.50%)</strong></td><td class="model-start dflash2">4.595</td></tr>
+<tr><th scope="row">HumanEval</th><td class="model-start mtp415">4.698</td><td class="model-start dflash">6.424</td><td class="model-start dmtp"><strong>6.795</strong> <strong class="acceptance-gain">(+5.78%)</strong></td><td class="model-start dflash2">6.609</td></tr>
+<tr><th scope="row">MATH500</th><td class="model-start mtp415">4.377</td><td class="model-start dflash">4.258</td><td class="model-start dmtp"><strong>4.968</strong> <strong class="acceptance-gain">(+16.67%)</strong></td><td class="model-start dflash2">4.536</td></tr>
+<tr><th scope="row">Alpaca</th><td class="model-start mtp415"><strong>3.529</strong></td><td class="model-start dflash">2.763</td><td class="model-start dmtp">3.358 <strong class="acceptance-gain">(+21.55%)</strong></td><td class="model-start dflash2">2.990</td></tr>
+<tr><th scope="row">MT-Bench</th><td class="model-start mtp415">3.599</td><td class="model-start dflash">3.209</td><td class="model-start dmtp"><strong>3.760</strong> <strong class="acceptance-gain">(+17.15%)</strong></td><td class="model-start dflash2">3.535</td></tr></tbody>
 </table></div>
 
 
-<p>We report <strong>per-request mean acceptance length</strong>, including the target correction or bonus token, with each MT-Bench turn counted separately. <strong class="acceptance-comparison">DMTP&#39;s improvement over DFlash</strong> appears in red parentheses. Native MTP415 proposes four candidates per round; DFlash and DMTP each propose seven.</p>
+<p>DMTP improves per-request mean acceptance length over DFlash on all five short-output benchmarks: <strong>17.50%</strong> on GSM8K, <strong>5.78%</strong> on HumanEval, <strong>16.67%</strong> on MATH500, <strong>21.55%</strong> on Alpaca, and <strong>17.15%</strong> on MT-Bench.</p>
+<p>We report <strong>per-request mean acceptance length</strong>, including the target correction or bonus token, with each MT-Bench turn counted separately. <strong class="acceptance-comparison">DMTP(DFLASH)&#39;s improvement over DFlash</strong> appears in red parentheses; DFlash2 is a separate baseline with acceptance length only. Native MTP415 proposes four candidates per round; DFlash, DFlash2, and DMTP each propose seven.</p>
+<p>The DFlash, DFlash2, and DMTP(DFLASH) checkpoints are all evaluated at 24,000 training steps. DFlash2 retains block-local convolution and the path selector. DMTP(DFLASH) uses ordinary DFlash for parallel drafting, not the combination of DFlash2 and single-anchor conditioning.</p>
 <h2 id="en-section-9">9. Future Directions</h2>
 <p><strong>One limitation of DMTP is its reliance on native MTP&#39;s first-token prediction.</strong> When MTP is insufficiently trained for a particular setting, its first-token acceptance can be lower than that of a DFlash model fine-tuned on relevant task data. Delegating the first token to MTP may then be the weaker choice. We want to better understand this gap and explore how training and cooperation between the two models can improve those settings.</p>
 <p>Beyond the current target-only verifier, we plan to explore <strong>rejection sampling and block verify</strong>, evaluating acceptance length, sampling consistency, and end-to-end throughput.</p>
