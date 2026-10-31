@@ -16,7 +16,7 @@ We introduce **DMTP**: pretrained MTP proposes the first candidate token in each
 
 - **Native MTP's first-token advantage is worth reusing.** With the same Target and inputs, we observe higher first-token acceptance from MTP than DFlash. We therefore use MTP for T1 and DFlash for the remaining six parallel proposals.
 - **Pass MTP's pretrained capability to DFlash through hidden states.** We use MTP not only to generate T1, but also to fuse the hidden state that predicted it with its token embedding. DFlash can then use both the concrete candidate and features learned during MTP pretraining to predict the continuation in parallel.
-- **The gains extend from long-context workloads to public short-output benchmarks.** On Qwen3.6-35B-A3B, DMTP improves acceptance length by **9.25%–19.56%** across six workloads and B32 end-to-end throughput by **17.10%–23.75%**, relative to DFlash. With public Qwen3.6-27B weights and OpenPerfectBlend, we also obtain **5.78%–21.55%** higher acceptance length across math, code, and chat tasks.
+- **The gains extend across long- and short-text tasks.** On long-text tasks with Qwen3.6-35B-A3B, DMTP improves acceptance length by **9.25%–19.56%** and B32 end-to-end throughput by **17.10%–23.75%**, relative to DFlash. On short-text tasks using public Qwen3.6-27B weights and OpenPerfectBlend, DMTP improves acceptance length by **5.78%–21.55%** over DFlash and **____%** over DFlash2, covering math, code, and chat.
 - **DMTP complements optimizations within MTP and DFlash.** We change how the two models cooperate; stronger predictors, training methods, candidate-selection strategies, and inference kernels can all be combined with this framework.
 
 ## 1. First-Token Acceptance and Parallel Drafting

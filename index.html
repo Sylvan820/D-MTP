@@ -27,7 +27,7 @@
 <ul>
 <li><strong>原生 MTP 的首位优势值得复用。</strong> 在相同目标模型和输入下，我们观察到 MTP 的首 token 接受率高于 DFlash。因此，我们让 MTP 生成首个候选，再由 DFlash 并行预测后六个候选。</li>
 <li><strong>通过隐藏状态，把 MTP 的预训练能力带给 DFlash。</strong> 我们不只让 MTP 生成首个候选，还把预测它时的隐藏状态与候选的词嵌入融合。这样，DFlash 在续写时既能看到具体的候选，也能利用 MTP 在预训练中学到的特征，帮助后续 token 的并行预测。</li>
-<li><strong>收益同时覆盖长文场景与开源短文评测。</strong> 在 Qwen3.6-35B-A3B 的六类任务上，DMTP 相对 DFlash 的接受长度提高 <strong>9.25%～19.56%</strong>，B32 端到端吞吐提高 <strong>17.10%～23.75%</strong>。在公开 Qwen3.6-27B 与 OpenPerfectBlend 上，我们也获得了 <strong>5.78%～21.55%</strong> 的接受长度提升，覆盖数学、代码与聊天任务。</li>
+<li><strong>收益同时覆盖长文与短文任务。</strong> 长文任务中，在 Qwen3.6-35B-A3B 上，DMTP 相对 DFlash 的接受长度提高 <strong>9.25%～19.56%</strong>，B32 端到端吞吐提高 <strong>17.10%～23.75%</strong>。短文任务中，基于公开 Qwen3.6-27B 与 OpenPerfectBlend，DMTP 的接受长度相对 DFlash 提高 <strong>5.78%～21.55%</strong>，相对 DFlash2 提高 <strong>____%</strong>，覆盖数学、代码与聊天任务。</li>
 <li><strong>与 MTP、DFlash 的优化正交。</strong> DMTP 改进的是两者的协作方式；更强的预测器、训练方法、候选选择策略和推理 kernel，都可以继续结合到这一框架中。</li>
 </ul>
 <h2 id="zh-section-1">1. 首位接受率与并行 Draft</h2>
@@ -630,7 +630,7 @@ Target：验证七个候选，提交接受前缀与修正/bonus
 <ul>
 <li><strong>Native MTP&#39;s first-token advantage is worth reusing.</strong> With the same Target and inputs, we observe higher first-token acceptance from MTP than DFlash. We therefore use MTP for T1 and DFlash for the remaining six parallel proposals.</li>
 <li><strong>Pass MTP&#39;s pretrained capability to DFlash through hidden states.</strong> We use MTP not only to generate T1, but also to fuse the hidden state that predicted it with its token embedding. DFlash can then use both the concrete candidate and features learned during MTP pretraining to predict the continuation in parallel.</li>
-<li><strong>The gains extend from long-context workloads to public short-output benchmarks.</strong> On Qwen3.6-35B-A3B, DMTP improves acceptance length by <strong>9.25%–19.56%</strong> across six workloads and B32 end-to-end throughput by <strong>17.10%–23.75%</strong>, relative to DFlash. With public Qwen3.6-27B weights and OpenPerfectBlend, we also obtain <strong>5.78%–21.55%</strong> higher acceptance length across math, code, and chat tasks.</li>
+<li><strong>The gains extend across long- and short-text tasks.</strong> On long-text tasks with Qwen3.6-35B-A3B, DMTP improves acceptance length by <strong>9.25%–19.56%</strong> and B32 end-to-end throughput by <strong>17.10%–23.75%</strong>, relative to DFlash. On short-text tasks using public Qwen3.6-27B weights and OpenPerfectBlend, DMTP improves acceptance length by <strong>5.78%–21.55%</strong> over DFlash and <strong>____%</strong> over DFlash2, covering math, code, and chat.</li>
 <li><strong>DMTP complements optimizations within MTP and DFlash.</strong> We change how the two models cooperate; stronger predictors, training methods, candidate-selection strategies, and inference kernels can all be combined with this framework.</li>
 </ul>
 <h2 id="en-section-1">1. First-Token Acceptance and Parallel Drafting</h2>
