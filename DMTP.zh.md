@@ -324,34 +324,28 @@ DMTP 在六类任务的 T1～T7 位置均获得了更高的累计接受率，表
 
 ## 8. 开源复现与评测
 
-我们使用**开源 Qwen3.6-27B 权重与 OpenPerfectBlend 数据集**，训练 DFlash、DFlash2 及各自对应的 DMTP 版本。四组采用相同的数据与训练预算，目标模型和原生 MTP 保持冻结。
+为便于复现，我们使用**开源 Qwen3.6-27B 权重与 OpenPerfectBlend 数据集**，训练 DFlash、DFlash2 及各自对应的 DMTP 版本。四组采用相同的数据与训练预算，目标模型和原生 MTP 保持冻结。起草模型统一使用五层结构，动态序列长度最长为 2K，全局批量为 128，在八张 GPU 上以 BF16 训练三个 epoch，即完整遍历训练数据三次，约 31K 步。
 
-我们使用五层起草模型、最长 2K 的动态序列长度和 128 的全局批量，在八张 GPU 上以 BF16 训练三个 epoch。
-
-DFlash 沿用位置衰减交叉熵；DFlash2 结合块内信息交互、路径选择与自适应损失。对应的 DMTP 版本在首个候选位置融合 MTP 表示，均保留七个候选。
+DFlash 沿用位置衰减交叉熵，DFlash2 结合块内信息交互、路径选择与自适应损失。在两组基线之上，我们分别加入首个候选位置的 MTP 表示融合，训练对应的 DMTP 版本，保持每轮七个候选的预算不变。
 
 ### 接受长度评测
 
-我们使用四卡张量并行，批量上限为 32，温度为 0，每轮最多生成 1,024 个 token，遇结束符正常停止。输入统一使用目标模型的聊天模板，设置 `enable_thinking=False`，验证采用 target-only 方式。
+评测使用四卡张量并行，批量上限为 32，温度为 0，每轮最多生成 1,024 个 token，遇结束符正常停止。我们统一使用目标模型的聊天模板，设置 `enable_thinking=False`，并沿用前文的 target-only 验证方式。
 
-OpenPerfectBlend 侧重数学与代码，Alpaca 和 MT-Bench 用于聊天评测。每个数据集取前 80 条；MT-Bench 保留完整双轮会话，第二轮使用各模型自身的第一轮回答。
+OpenPerfectBlend 侧重数学与代码，因此我们除数学、代码任务外，也使用 Alpaca 和 MT-Bench 观察聊天场景下的表现。每个数据集取前 80 条；MT-Bench 保留完整双轮会话，第二轮使用各模型自身的第一轮回答。
 
 <table>
-<colgroup><col style="width:14%"><col style="width:12%"><col style="width:12%"><col style="width:12%"><col style="width:12%"><col style="width:19%"><col style="width:19%"></colgroup>
-<thead><tr><th class="acceptance-dataset" rowspan="2" scope="col">数据集</th><th class="acceptance-model" colspan="2" scope="colgroup">原生 MTP415</th><th class="acceptance-model" colspan="2" scope="colgroup">DFlash</th><th class="acceptance-model" colspan="2" scope="colgroup">DMTP(DFLASH)</th></tr><tr><th class="model-start" scope="col">Per-request</th><th scope="col">Per-verify</th><th class="model-start" scope="col">Per-request</th><th scope="col">Per-verify</th><th class="model-start" scope="col">Per-request</th><th scope="col">Per-verify</th></tr></thead>
-<tbody><tr><th scope="row">GSM8K</th><td class="model-start mtp415">4.373</td><td class="mtp415">4.334</td><td class="model-start dflash">4.318</td><td class="dflash">4.234</td><td class="model-start dmtp"><strong>5.074</strong> <strong class="acceptance-gain">(+17.50%)</strong></td><td class="dmtp"><strong>4.897</strong> <strong class="acceptance-gain">(+15.65%)</strong></td></tr>
-<tr><th scope="row">HumanEval</th><td class="model-start mtp415">4.698</td><td class="mtp415">4.623</td><td class="model-start dflash">6.424</td><td class="dflash">5.804</td><td class="model-start dmtp"><strong>6.795</strong> <strong class="acceptance-gain">(+5.78%)</strong></td><td class="dmtp"><strong>6.245</strong> <strong class="acceptance-gain">(+7.60%)</strong></td></tr>
-<tr><th scope="row">MATH500</th><td class="model-start mtp415">4.377</td><td class="mtp415">4.359</td><td class="model-start dflash">4.258</td><td class="dflash">4.207</td><td class="model-start dmtp"><strong>4.968</strong> <strong class="acceptance-gain">(+16.67%)</strong></td><td class="dmtp"><strong>4.918</strong> <strong class="acceptance-gain">(+16.90%)</strong></td></tr>
-<tr><th scope="row">Alpaca</th><td class="model-start mtp415"><strong>3.529</strong></td><td class="mtp415"><strong>3.299</strong></td><td class="model-start dflash">2.763</td><td class="dflash">2.524</td><td class="model-start dmtp">3.358 <strong class="acceptance-gain">(+21.55%)</strong></td><td class="dmtp">3.066 <strong class="acceptance-gain">(+21.48%)</strong></td></tr>
-<tr><th scope="row">MT-Bench</th><td class="model-start mtp415">3.599</td><td class="mtp415"><strong>3.392</strong></td><td class="model-start dflash">3.209</td><td class="dflash">2.708</td><td class="model-start dmtp"><strong>3.760</strong> <strong class="acceptance-gain">(+17.15%)</strong></td><td class="dmtp">3.246 <strong class="acceptance-gain">(+19.87%)</strong></td></tr></tbody>
+<colgroup><col style="width:22%"><col style="width:22%"><col style="width:22%"><col style="width:34%"></colgroup>
+<thead><tr><th class="acceptance-dataset" scope="col">数据集</th><th class="acceptance-model" scope="col">原生 MTP415</th><th class="acceptance-model" scope="col">DFlash</th><th class="acceptance-model" scope="col">DMTP(DFLASH)</th></tr></thead>
+<tbody><tr><th scope="row">GSM8K</th><td class="model-start mtp415">4.373</td><td class="model-start dflash">4.318</td><td class="model-start dmtp"><strong>5.074</strong> <strong class="acceptance-gain">(+17.50%)</strong></td></tr>
+<tr><th scope="row">HumanEval</th><td class="model-start mtp415">4.698</td><td class="model-start dflash">6.424</td><td class="model-start dmtp"><strong>6.795</strong> <strong class="acceptance-gain">(+5.78%)</strong></td></tr>
+<tr><th scope="row">MATH500</th><td class="model-start mtp415">4.377</td><td class="model-start dflash">4.258</td><td class="model-start dmtp"><strong>4.968</strong> <strong class="acceptance-gain">(+16.67%)</strong></td></tr>
+<tr><th scope="row">Alpaca</th><td class="model-start mtp415"><strong>3.529</strong></td><td class="model-start dflash">2.763</td><td class="model-start dmtp">3.358 <strong class="acceptance-gain">(+21.55%)</strong></td></tr>
+<tr><th scope="row">MT-Bench</th><td class="model-start mtp415">3.599</td><td class="model-start dflash">3.209</td><td class="model-start dmtp"><strong>3.760</strong> <strong class="acceptance-gain">(+17.15%)</strong></td></tr></tbody>
 </table>
 
 
-表中报告请求级平均（Per-request）与验证轮次平均（Per-verify）接受长度，均包含目标模型的修正或 bonus token；MT-Bench 的每轮生成分别计入。
-
-<strong class="acceptance-comparison">DMTP 相对 DFlash 的提升</strong>以红色括号标出。
-
-原生 MTP415 每轮提出四个候选，DFlash 与 DMTP 均为七个。
+表中报告**请求级平均接受长度（Per-request）**，包含目标模型的修正或 bonus token；MT-Bench 的每轮生成分别计入。<strong class="acceptance-comparison">DMTP 相对 DFlash 的提升</strong>以红色括号标出。原生 MTP415 每轮提出四个候选，DFlash 与 DMTP 均为七个。
 
 ## 9. 后续方向
 

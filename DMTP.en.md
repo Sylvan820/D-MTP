@@ -325,34 +325,28 @@ We compute end-to-end throughput as total output tokens divided by workload comp
 
 ## 8. Open-Source Reproduction and Evaluation
 
-We train **DFlash, DFlash2, and their DMTP counterparts** using public Qwen3.6-27B weights and OpenPerfectBlend. All four share the same data and training budget; the target model and native MTP remain frozen.
+For reproducibility, we train **DFlash, DFlash2, and their DMTP counterparts** using public Qwen3.6-27B weights and OpenPerfectBlend. All four share the same data and training budget, with the target model and native MTP frozen. We use five-layer drafts, dynamic sequences up to 2K, and a global batch size of 128, training on eight GPUs in BF16 for three epochs: three full passes over the data, or approximately 31K steps.
 
-We use a five-layer draft, dynamic sequences up to 2K, and a global batch size of 128. We train for three epochs on eight GPUs in BF16.
-
-DFlash retains position-decayed cross-entropy; DFlash2 combines block-local mixing, path selection, and adaptive loss. Their DMTP counterparts fuse MTP features at the first candidate position, preserving seven proposals per round.
+DFlash retains position-decayed cross-entropy, while DFlash2 combines block-local mixing, path selection, and adaptive loss. We add MTP representation fusion at the first candidate position to each baseline and train the corresponding DMTP model, preserving seven proposals per round.
 
 ### Acceptance-Length Evaluation
 
-We use four-way tensor parallelism, a batch limit of 32, temperature 0, and up to 1,024 output tokens per turn, stopping at EOS. Inputs use the target model's chat template with `enable_thinking=False`; verification is target-only.
+We evaluate with four-way tensor parallelism, a batch limit of 32, temperature 0, and up to 1,024 output tokens per turn, stopping at EOS. All models use the target model's chat template with `enable_thinking=False` and the target-only verification described earlier.
 
-OpenPerfectBlend focuses on math and code; Alpaca and MT-Bench evaluate chat. We use the first 80 entries from each dataset. MT-Bench retains complete two-turn conversations, with each model's own first-turn response carried into the second turn.
+OpenPerfectBlend focuses on math and code, so we also evaluate chat using Alpaca and MT-Bench. We take the first 80 entries from each dataset; MT-Bench retains complete two-turn conversations, carrying each model's own first-turn response into the second turn.
 
 <table>
-<colgroup><col style="width:14%"><col style="width:12%"><col style="width:12%"><col style="width:12%"><col style="width:12%"><col style="width:19%"><col style="width:19%"></colgroup>
-<thead><tr><th class="acceptance-dataset" rowspan="2" scope="col">Dataset</th><th class="acceptance-model" colspan="2" scope="colgroup">Native MTP415</th><th class="acceptance-model" colspan="2" scope="colgroup">DFlash</th><th class="acceptance-model" colspan="2" scope="colgroup">DMTP(DFLASH)</th></tr><tr><th class="model-start" scope="col">Per-request</th><th scope="col">Per-verify</th><th class="model-start" scope="col">Per-request</th><th scope="col">Per-verify</th><th class="model-start" scope="col">Per-request</th><th scope="col">Per-verify</th></tr></thead>
-<tbody><tr><th scope="row">GSM8K</th><td class="model-start mtp415">4.373</td><td class="mtp415">4.334</td><td class="model-start dflash">4.318</td><td class="dflash">4.234</td><td class="model-start dmtp"><strong>5.074</strong> <strong class="acceptance-gain">(+17.50%)</strong></td><td class="dmtp"><strong>4.897</strong> <strong class="acceptance-gain">(+15.65%)</strong></td></tr>
-<tr><th scope="row">HumanEval</th><td class="model-start mtp415">4.698</td><td class="mtp415">4.623</td><td class="model-start dflash">6.424</td><td class="dflash">5.804</td><td class="model-start dmtp"><strong>6.795</strong> <strong class="acceptance-gain">(+5.78%)</strong></td><td class="dmtp"><strong>6.245</strong> <strong class="acceptance-gain">(+7.60%)</strong></td></tr>
-<tr><th scope="row">MATH500</th><td class="model-start mtp415">4.377</td><td class="mtp415">4.359</td><td class="model-start dflash">4.258</td><td class="dflash">4.207</td><td class="model-start dmtp"><strong>4.968</strong> <strong class="acceptance-gain">(+16.67%)</strong></td><td class="dmtp"><strong>4.918</strong> <strong class="acceptance-gain">(+16.90%)</strong></td></tr>
-<tr><th scope="row">Alpaca</th><td class="model-start mtp415"><strong>3.529</strong></td><td class="mtp415"><strong>3.299</strong></td><td class="model-start dflash">2.763</td><td class="dflash">2.524</td><td class="model-start dmtp">3.358 <strong class="acceptance-gain">(+21.55%)</strong></td><td class="dmtp">3.066 <strong class="acceptance-gain">(+21.48%)</strong></td></tr>
-<tr><th scope="row">MT-Bench</th><td class="model-start mtp415">3.599</td><td class="mtp415"><strong>3.392</strong></td><td class="model-start dflash">3.209</td><td class="dflash">2.708</td><td class="model-start dmtp"><strong>3.760</strong> <strong class="acceptance-gain">(+17.15%)</strong></td><td class="dmtp">3.246 <strong class="acceptance-gain">(+19.87%)</strong></td></tr></tbody>
+<colgroup><col style="width:22%"><col style="width:22%"><col style="width:22%"><col style="width:34%"></colgroup>
+<thead><tr><th class="acceptance-dataset" scope="col">Dataset</th><th class="acceptance-model" scope="col">Native MTP415</th><th class="acceptance-model" scope="col">DFlash</th><th class="acceptance-model" scope="col">DMTP(DFLASH)</th></tr></thead>
+<tbody><tr><th scope="row">GSM8K</th><td class="model-start mtp415">4.373</td><td class="model-start dflash">4.318</td><td class="model-start dmtp"><strong>5.074</strong> <strong class="acceptance-gain">(+17.50%)</strong></td></tr>
+<tr><th scope="row">HumanEval</th><td class="model-start mtp415">4.698</td><td class="model-start dflash">6.424</td><td class="model-start dmtp"><strong>6.795</strong> <strong class="acceptance-gain">(+5.78%)</strong></td></tr>
+<tr><th scope="row">MATH500</th><td class="model-start mtp415">4.377</td><td class="model-start dflash">4.258</td><td class="model-start dmtp"><strong>4.968</strong> <strong class="acceptance-gain">(+16.67%)</strong></td></tr>
+<tr><th scope="row">Alpaca</th><td class="model-start mtp415"><strong>3.529</strong></td><td class="model-start dflash">2.763</td><td class="model-start dmtp">3.358 <strong class="acceptance-gain">(+21.55%)</strong></td></tr>
+<tr><th scope="row">MT-Bench</th><td class="model-start mtp415">3.599</td><td class="model-start dflash">3.209</td><td class="model-start dmtp"><strong>3.760</strong> <strong class="acceptance-gain">(+17.15%)</strong></td></tr></tbody>
 </table>
 
 
-We report per-request and per-verification-round mean acceptance lengths, including the target correction or bonus token. Each MT-Bench turn counts separately.
-
-<strong class="acceptance-comparison">DMTP's improvement over DFlash</strong> appears in red parentheses.
-
-Native MTP415 proposes four candidates per round; DFlash and DMTP each propose seven.
+We report **per-request mean acceptance length**, including the target correction or bonus token, with each MT-Bench turn counted separately. <strong class="acceptance-comparison">DMTP's improvement over DFlash</strong> appears in red parentheses. Native MTP415 proposes four candidates per round; DFlash and DMTP each propose seven.
 
 ## 9. Future Directions
 
