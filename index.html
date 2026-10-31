@@ -1,0 +1,1181 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>DMTP: A Better First Token for Block Drafting via MTP</title>
+<meta name="description" content="DMTP combines pretrained MTP first-token prediction with parallel DFlash drafting. A technical blog by Piggy Shen covering the method, inference design, and evaluation.">
+<link rel="stylesheet" href="katex.min.css"><link rel="stylesheet" href="style.css"></head>
+<body>
+<header class="site-header"><div class="header-inner">
+<a class="wordmark" href="#" aria-label="DMTP home">DMTP<span class="wordmark-dot"></span></a>
+<span class="header-note"><span data-lang="zh" hidden>技术博客</span><span data-lang="en">TECHNICAL BLOG</span></span>
+<div class="language-control" role="group" aria-label="Language / 语言">
+<button type="button" data-set-lang="zh" aria-pressed="false">中文</button><button type="button" data-set-lang="en" aria-pressed="true">English</button>
+</div></div></header>
+<div class="reading-progress" aria-hidden="true"><span></span></div>
+<main class="layout">
+<div class="article-column">
+<div class="edition"><span class="edition-line"></span><span data-lang="zh" hidden>预训练先验 × 并行续写</span><span data-lang="en">PRETRAINED PRIORS × PARALLEL DRAFTING</span></div>
+<article id="article-zh" lang="zh-CN" hidden><h1>DMTP：让预训练 MTP 为并行 Draft 开个好头</h1>
+<p><strong>Piggy Shen · 2026 年 10 月 · 技术博客</strong></p>
+<p>投机解码已成为大模型推理基础设施的重要组成部分。<a href="https://z-lab.ai/projects/dflash/">DFlash</a> 展示了并行预测多个候选的潜力，DeepSeek 也在生产服务中采用 <a href="https://arxiv.org/abs/2607.05147">DSpark</a>，并报告了相对 MTP-1 的收益。然而，在 GLM、Qwen 等原生 MTP 训练充分的模型及部分对话场景中，DFlash 相比 MTP 并不总有显著优势。</p>
+<p>我们的评测以及与 Domino 作者 Jianuo Huang 的讨论，揭示了两者的互补性：原生 MTP 的首 token 接受率更高，在 OOD 场景下尤其明显；DFlash 则能并行生成更长的续写。这为结合预训练首位能力与并行预测提供了直接动机。</p>
+<p>针对DFlash类模型在block内后续位置接受率逐渐衰减的问题，已有多种改进方案。<strong>我们关注的是另一个问题：能不能先把第一个draft token的接受率提上去？</strong> 在前缀验证下，首位被拒绝，后面的候选就无法在本轮提交。DMTP从预训练MTP的首位预测出发，再把它的hidden传给DFlash，帮助后续并行续写。</p>
+<p>我们提出 <strong>DMTP</strong>：由预训练 MTP 生成第一个候选，再由 DFlash 并行生成后续候选。本文选择 <strong>MTP 式词元与隐藏状态融合</strong>作为主方法，将预测 T1 的 MTP 隐藏状态与 T1 词嵌入分别归一化、拼接投影，在 T1 输入位置连接预训练表示与并行续写。</p>
+<blockquote>
+<p><strong>核心思路：</strong> 让 MTP 为生成开个好头，让 DFlash 并行完成续写。两者既共享候选 token，也通过预测表示建立联系，而不必替换各自的主干。</p>
+</blockquote>
+<h2 id="zh-section-0">核心观察</h2>
+<ul>
+<li><strong>原生 MTP 的首位优势值得复用。</strong> 在相同 Target 和输入下，我们观察到 MTP 的首 token 接受率高于 DFlash。因此，我们让 MTP 生成 T1，再由 DFlash 并行预测后六个候选。</li>
+<li><strong>通过 hidden，把 MTP 的预训练能力带给 DFlash。</strong> 我们不只让 MTP 生成 T1，还把预测它时的 hidden 与 T1 的词嵌入融合。这样，DFlash 在续写时既能看到具体的候选，也能利用 MTP 在预训练中学到的特征，帮助后续 token 的并行预测。</li>
+<li><strong>组合后的收益体现在完整生成中，也能与已有优化结合。</strong> 我们在六类任务上获得了 <strong>9.25%～19.56%</strong> 的接受长度提升；在 B32 的四类任务评测中，端到端吞吐提高了 <strong>17.10%～23.75%</strong>，均以 DFlash 为基线。DMTP 改进的是两者的协作方式，与 MTP、DFlash 各自的优化工作正交：更强的预测器、训练方法、候选选择策略和推理 kernel，都可以继续结合到这一框架中。</li>
+</ul>
+<h2 id="zh-section-1">1. 首位接受率与并行 Draft</h2>
+<p>图1比较同一 Target 模型上的 <strong>DFlash 与原生 MTP</strong>。DFlash 使用混合任务数据训练，训练长度为 32K；MTP 使用同一 Target 自带的预训练权重。</p>
+<p>两组采用相同的Qwen3.6-35B-A3B target和输入集合，覆盖Code、Math、MT-Bench、Agent、SWE、Long-horizon六类负载。<strong>DMTP组合只用MTP生成T1，后续六个候选由DFlash并行生成。</strong></p>
+<figure><a href="first-token.png" target="_blank" rel="noopener" title="查看原图"><img loading="lazy" src="first-token.png" alt="DFlash与原生MTP六类首位接受率"></a></figure>
+<p><em>图 1：Qwen3.6-35B-A3B 在六类任务上的首 token 接受率，生成温度为 1。</em></p>
+<p>Code 上，DFlash 与 MTP 的首位接受率分别为 71.00% 和 82.32%。</p>
+<p><strong>我们认为，大规模预训练是 MTP 首位优势的重要来源。</strong> 原生 MTP 随 Target 一起训练，接触的数据远多于我们单独训练的 DFlash draft。这让我们更倾向于保留它已经学到的首位预测能力，而不是重新训练一个替代模块。</p>
+<h2 id="zh-section-2">2. DMTP：第一步用 MTP，后六步交给 DFlash</h2>
+<p>最直接的分工是：</p>
+<pre><code class="language-text">MTP：生成 T1
+DFlash：以 T1 为条件，一次生成 T2～T7
+Target：验证七个候选，提交接受前缀与修正/bonus
+</code></pre>
+<figure><a href="architecture.png" target="_blank" rel="noopener" title="查看原图"><img loading="lazy" src="architecture.png" alt="MTP式词元与隐藏状态融合：预测T1的隐藏状态与T1词嵌入归一化拼接，融合后的T1输入DFlash"></a></figure>
+<p><em>图 2：原版 DFlash（上）与 DMTP（下）。DMTP 将预测 T1 的 MTP hidden 与 T1 词嵌入融合，再并行预测 T2～T7，保留原 Target context → KV 路径。T1 词嵌入来自 token 查表。</em></p>
+<p>我们选择这个分工，主要考虑了三点。</p>
+<p><strong>保留首位能力。</strong> 我们冻结原生 MTP，保留其预训练的首位预测，只训练后续的并行 draft。</p>
+<p><strong>缩短预测距离。</strong> 给定 T1 后，T2 成为新 anchor 后的第一个未知 token，DFlash 以此为起点并行续写。</p>
+<p><strong>传递预训练特征。</strong> 除了 T1，我们还传入预测它时的 MTP hidden，让 DFlash 利用这些特征预测后续 token。</p>
+<h3>单步 MTP 预测</h3>
+<p>我们只用 MTP 生成 T1，以控制串行 draft 开销。更多 MTP 候选需要逐步前向与选词，而后六个候选可由 DFlash 一次并行生成。</p>
+<h2 id="zh-section-3">3. MTP 表示的注入方式</h2>
+<p>我们采用 <strong>MTP 式词元与隐藏状态融合</strong>，并通过消融比较不同的表示注入方式。</p>
+<p>设 <span class="inline-math"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>A</mi><mo>=</mo><msub><mi>x</mi><mi>a</mi></msub></mrow><annotation encoding="application/x-tex">A = x_a</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6833em;"></span><span class="mord mathnormal">A</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.5806em;vertical-align:-0.15em;"></span><span class="mord"><span class="mord mathnormal">x</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.1514em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">a</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span></span></span></span></span> 是 Target 已经输出、但尚未处理的 pending token。Target context 截止 <span class="inline-math"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>x</mi><mrow><mi>a</mi><mo>−</mo><mn>1</mn></mrow></msub></mrow><annotation encoding="application/x-tex">x_{a-1}</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6389em;vertical-align:-0.2083em;"></span><span class="mord"><span class="mord mathnormal">x</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3011em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight">a</span><span class="mbin mtight">−</span><span class="mord mtight">1</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2083em;"><span></span></span></span></span></span></span></span></span></span></span>。MTP 读取上一位置的 Target hidden 与 <span class="inline-math"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>A</mi></mrow><annotation encoding="application/x-tex">A</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6833em;"></span><span class="mord mathnormal">A</span></span></span></span></span>，得到用于预测 <span class="inline-math"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>T</mi><mn>1</mn></msub><mo>=</mo><msub><mi>x</mi><mrow><mi>a</mi><mo>+</mo><mn>1</mn></mrow></msub></mrow><annotation encoding="application/x-tex">T_1 = x_{a+1}</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.8333em;vertical-align:-0.15em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.13889em;">T</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3011em;"><span style="top:-2.55em;margin-left:-0.1389em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight">1</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.6389em;vertical-align:-0.2083em;"></span><span class="mord"><span class="mord mathnormal">x</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3011em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight">a</span><span class="mbin mtight">+</span><span class="mord mtight">1</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2083em;"><span></span></span></span></span></span></span></span></span></span></span> 的表示。不需要 Target 处理 <span class="inline-math"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>A</mi></mrow><annotation encoding="application/x-tex">A</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6833em;"></span><span class="mord mathnormal">A</span></span></span></span></span> 或 <span class="inline-math"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>T</mi><mn>1</mn></msub></mrow><annotation encoding="application/x-tex">T_1</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.8333em;vertical-align:-0.15em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.13889em;">T</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3011em;"><span style="top:-2.55em;margin-left:-0.1389em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight">1</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span></span></span></span></span> 后的 hidden。</p>
+<p>融合使用的就是<strong>预测 T1 时的 MTP hidden</strong>，不是消费 T1 之后的下一份 hidden：</p>
+<div class="equation"><span class="katex-display"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><msub><mover accent="true"><mi mathvariant="bold">e</mi><mo stretchy="true">~</mo></mover><msub><mi>T</mi><mn>1</mn></msub></msub><mo>=</mo><msub><mi>W</mi><mi>f</mi></msub><mrow><mo fence="true">[</mo><msub><mrow><mi mathvariant="normal">RMS</mi><mo>⁡</mo></mrow><mi>e</mi></msub><mo stretchy="false">(</mo><msub><mi mathvariant="bold">e</mi><msub><mi>T</mi><mn>1</mn></msub></msub><mo stretchy="false">)</mo><mo separator="true">;</mo><msub><mrow><mi mathvariant="normal">RMS</mi><mo>⁡</mo></mrow><mi>m</mi></msub><mo stretchy="false">(</mo><msub><mi mathvariant="bold">h</mi><mrow><mi mathvariant="normal">M</mi><mi mathvariant="normal">T</mi><mi mathvariant="normal">P</mi></mrow></msub><mo stretchy="false">)</mo><mo fence="true">]</mo></mrow><mi mathvariant="normal">.</mi></mrow><annotation encoding="application/x-tex">\widetilde{\mathbf e}_{T_1}=W_f\left[\operatorname{RMS}_e(\mathbf e_{T_1});\operatorname{RMS}_m(\mathbf h_{\mathrm{MTP}})\right].</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.9545em;vertical-align:-0.2501em;"></span><span class="mord"><span class="mord accent"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.7044em;"><span style="top:-3em;"><span class="pstrut" style="height:3em;"></span><span class="mord mathbf">e</span></span><span class="svg-align" style="width:calc(100% - 0.1111em);margin-left:0.1111em;top:-3.4444em;"><span class="pstrut" style="height:3em;"></span><span style="height:0.26em;"><svg xmlns="http://www.w3.org/2000/svg" width="100%" height="0.26em" viewBox="0 0 600 260" preserveAspectRatio="none"><path d="M200 55.538c-77 0-168 73.953-177 73.953-3 0-7
+-2.175-9-5.437L2 97c-1-2-2-4-2-6 0-4 2-7 5-9l20-12C116 12 171 0 207 0c86 0
+ 114 68 191 68 78 0 168-68 177-68 4 0 7 2 9 5l12 19c1 2.175 2 4.35 2 6.525 0
+ 4.35-2 7.613-5 9.788l-19 13.05c-92 63.077-116.937 75.308-183 76.128
+-68.267.847-113-73.952-191-73.952z"/></svg></span></span></span></span></span></span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3283em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mtight"><span class="mord mathnormal mtight" style="margin-right:0.13889em;">T</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3173em;"><span style="top:-2.357em;margin-left:-0.1389em;margin-right:0.0714em;"><span class="pstrut" style="height:2.5em;"></span><span class="sizing reset-size3 size1 mtight"><span class="mord mtight">1</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.143em;"><span></span></span></span></span></span></span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2501em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:1.0361em;vertical-align:-0.2861em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.13889em;">W</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:-0.1389em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.10764em;">f</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2861em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="minner"><span class="mopen delimcenter" style="top:0em;">[</span><span class="mop"><span class="mop"><span class="mord mathrm">RMS</span></span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.1514em;"><span style="top:-2.55em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">e</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mopen">(</span><span class="mord"><span class="mord mathbf">e</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3283em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mtight"><span class="mord mathnormal mtight" style="margin-right:0.13889em;">T</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3173em;"><span style="top:-2.357em;margin-left:-0.1389em;margin-right:0.0714em;"><span class="pstrut" style="height:2.5em;"></span><span class="sizing reset-size3 size1 mtight"><span class="mord mtight">1</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.143em;"><span></span></span></span></span></span></span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2501em;"><span></span></span></span></span></span></span><span class="mclose">)</span><span class="mpunct">;</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mop"><span class="mop"><span class="mord mathrm">RMS</span></span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.1514em;"><span style="top:-2.55em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">m</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mopen">(</span><span class="mord"><span class="mord mathbf">h</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3283em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mtight"><span class="mord mathrm mtight">MTP</span></span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mclose">)</span><span class="mclose delimcenter" style="top:0em;">]</span></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord">.</span></span></span></span></span></div>
+
+<p>两路 2048 维特征独立使用可学习 RMSNorm，再经 4096→2048 线性投影。输入采用 <code>[T1,MASK×6]</code>，只用融合结果替换 T1 的 embedding；六个 MASK 的 embedding 与原预测头保持不变，Target context 继续走原 FC→KV 路径，不增加 MTP KV 槽位。</p>
+<h3>MTP 式融合的设计</h3>
+<p>我们借鉴原生 MTP 的归一化与拼接投影结构，融合参数单独训练。E(T1) 指定候选 token，MTP hidden 提供预测特征，六个 MASK 通过 attention 读取融合后的 T1。</p>
+<p>改动集中在 T1 的输入位置，历史特征、Target context 路径、DFlash 主干和候选预算保持不变。</p>
+<h3>单 Anchor 条件输入</h3>
+<blockquote>
+<p><strong>一个 Anchor，七个候选。</strong> 以 MTP 提出的 T1 为唯一 anchor，DFlash 并行预测 T2～T7。T1 仍可能被拒绝，送去验证的七个候选是 T1～T7。</p>
+</blockquote>
+<p>MTP 仍然消费 A，产生 T1 及预测它的 hidden；DFlash 只接收融合后的 T1 和六个 MASK。Target context 截止 A 之前，不需要额外执行 Target 前向。</p>
+<p><strong>双 Anchor 指在 MASK 前同时保留原本的 anchor A 和 MTP 提出的 T1。</strong> 输入为 <code>[A,T1,MASK×6]</code>，相比单 anchor 的 <code>[T1,MASK×6]</code>，额外提供 E(A)，让后续 MASK 通过 attention 更直接地读取原本 anchor 的词嵌入信息。A 已经输出，不属于本轮新增候选。</p>
+<p>我们选择效果接近、改动更少的单 Anchor：将原版 anchor 换成 T1，保留单 anchor 加 MASK 的布局。MASK 的 embedding、并行预测与原输出头结构不变，便于从已有 DFlash 继续微调。</p>
+<figure><a href="anchor-layout.png" target="_blank" rel="noopener" title="查看原图"><img loading="lazy" src="anchor-layout.png" alt="七个输入槽位：T1作为唯一anchor，六个待预测MASK"></a></figure>
+<p><em>图3a：七个输入槽位、七个候选。T1由MTP生成，T2～T7由DFlash生成。已知T1槽位不计算draft预测loss。</em></p>
+<h3>消融设计</h3>
+<ul>
+<li><strong>原始 DFlash。</strong> 单锚点外部基线，输入为 <code>[A,MASK×7]</code>，由 DFlash 提出全部七个候选。</li>
+<li><strong>仅使用候选词元的单锚点。</strong> <code>[T1,MASK×6]</code>，不额外注入 MTP 隐藏状态；仍使用原目标模型的隐藏状态上下文。</li>
+<li><strong>隐藏状态残差（首个候选位置）。</strong> MTP 隐藏状态经低秩网络得到残差，只加到 T1 词嵌入，六个掩码输入保持不变。</li>
+<li><strong>MTP 式词元与隐藏状态融合（主方法）。</strong> MTP 隐藏状态与 E(T1) 分别归一化、拼接投影，只替换 T1 词嵌入。</li>
+</ul>
+<p>补充对照包括六个掩码位置的隐藏状态残差、目标模型与 MTP 上下文融合，以及仅使用 MTP 上下文。上下文融合将五路目标模型特征与逐位置 MTP 特征拼接，进行 6H→H 投影。上述表示接口对照均以 T1 为唯一 anchor。</p>
+<figure><a href="injection-variants.png" target="_blank" rel="noopener" title="查看原图"><img loading="lazy" src="injection-variants.png" alt="主表四种方式：原始DFlash、候选词元单锚点、首个候选位置的隐藏状态残差及词元与隐藏状态融合"></a></figure>
+<p><em>图3b：仅展示主表四种方式，依次为原始 DFlash、仅使用候选词元的单锚点、首个候选位置的隐藏状态残差，以及 MTP 式词元与隐藏状态融合。四者均保留原目标模型上下文路径，候选预算均为七个；后两种分别在首个候选位置采用加性残差与替换式融合。</em></p>
+<h3>推理消融：Code 接受长度</h3>
+<p>我们在相同的 8 条代码任务输入上比较不同表示接口，固定模型、候选数量与生成设置。</p>
+<div class="table-scroll" tabindex="0"><table>
+<thead>
+<tr>
+<th>方法</th>
+<th>表示接口</th>
+<th>Code 接受长度</th>
+<th>相对单锚点对照</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>原始 DFlash</td>
+<td>单锚点，七个候选</td>
+<td>3.360</td>
+<td>-10.89%</td>
+</tr>
+<tr>
+<td>仅使用候选词元的单锚点</td>
+<td>无额外 MTP 隐藏状态注入</td>
+<td>3.770</td>
+<td>+0.00%</td>
+</tr>
+<tr>
+<td>隐藏状态残差（首个候选位置）</td>
+<td>MTP 隐藏状态残差只加到首个候选输入</td>
+<td>3.864</td>
+<td>+2.48%</td>
+</tr>
+<tr>
+<td>MTP 式词元与隐藏状态融合（双锚点）</td>
+<td>保留原本 A 与融合后的 T1，输入 [A,T1,MASK×6]</td>
+<td>3.951</td>
+<td>+4.80%</td>
+</tr>
+<tr>
+<td><strong>MTP 式词元与隐藏状态融合（主方法）</strong></td>
+<td><strong>仅替换首个候选词元的输入表示</strong></td>
+<td>3.963</td>
+<td>+5.12%</td>
+</tr>
+</tbody></table></div>
+<p><strong>双 Anchor 的接受长度为 3.951，与单 Anchor 主方法的 3.963 基本一致。</strong> 因此采用单 Anchor，保留原版 DFlash 的单 anchor 加 MASK 结构，减少接口改动。</p>
+<p><strong>加入 MTP hidden 后，接受长度从 3.770 提升至 3.963（+5.12%）。</strong> 词元与隐藏状态融合在这组 Code 消融中表现最好，因此我们选择它作为主方法。</p>
+<p><em>接受长度取 8 条 Code 请求的均值，包含 Target 修正/bonus token。主表采用统一推理实现；补充表中的六位置残差采用独立实现，作为辅助对照。</em></p>
+<details>
+<summary>补充对照：其他表示接口</summary>
+
+<div class="table-scroll" tabindex="0"><table>
+<thead>
+<tr>
+<th>方法</th>
+<th>表示接口</th>
+<th>Code 接受长度</th>
+<th>相对单锚点对照</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>隐藏状态残差（六个掩码位置）</td>
+<td>MTP 隐藏状态残差加到六个掩码输入</td>
+<td>3.842</td>
+<td>+1.92%</td>
+</tr>
+<tr>
+<td>目标模型与 MTP 上下文融合</td>
+<td>五路目标模型特征与 MTP 特征拼接投影</td>
+<td>3.714</td>
+<td>-1.49%</td>
+</tr>
+<tr>
+<td>仅使用 MTP 上下文</td>
+<td>由逐位置 MTP 特征提供上下文</td>
+<td>3.565</td>
+<td>-5.43%</td>
+</tr>
+</tbody></table></div>
+</details>
+
+<h3>与现有 Draft 方法的兼容性</h3>
+<p>我们保留 DFlash 主干、输出头与 Target context 接口。配置匹配时，可从已有 DFlash 权重继续微调，新增 T1 融合模块，使用 <code>[T1,MASK×6]</code> 监督后六个预测位置；Target 与 MTP 保持冻结。</p>
+<p>这一接口与 MTP、DFlash 各自的优化正交，可以结合更强的预测器、训练方法、path selector 和推理 kernel。</p>
+<h3>为什么保留预训练 MTP</h3>
+<p>我们也尝试过将 MTP layer 直接用于 DFlash 式并行预测，但观察到首位表现受到影响，收敛收益也有限。这让我们选择先冻结预训练 MTP，把它的首位能力保留下来，再围绕 T1 训练并行续写。</p>
+<h2 id="zh-section-4">4. DMTP 训练流程</h2>
+<p>我们使用 Qwen3.6-35B-A3B，训练长度为 32K，数据规模约 25 万条，大部分来自 Agent 和 Long-horizon 场景。MT-Bench 属于训练分布之外的 OOD 评测，用于观察模型的跨场景泛化表现。</p>
+<p>训练分为三步：</p>
+<ol>
+<li><strong>提取冻结特征。</strong> Target 处理训练序列；在每个 block 边界，MTP 读取 A 与上一位置的 Target hidden，得到预测 T1 的表示。DFlash context 只使用 A 之前的 Target 特征。</li>
+<li><strong>构造 Draft 输入。</strong> 使用 <code>[T1,MASK×6]</code>，其中 T1 取自训练数据。E(T1) 与预测 T1 的 MTP hidden 分别归一化、拼接投影，替换 T1 embedding，六个 MASK 不变。</li>
+<li><strong>优化后续预测。</strong> DFlash 沿用原位置衰减 CE，学习 T2～T7。Target 与 MTP 冻结，只更新 DFlash 与 T1 融合模块；已知 T1 输入槽位不计算 draft 预测 loss。</li>
+</ol>
+<p>训练时我们使用 <mark>GT T1</mark>，推理时换成 MTP 实际生成的 T1，这部分仍有训推差异。两边使用的 hidden 则保持相同的时序：都取预测 T1 时的 MTP 表示，而不是消费 T1 之后的 hidden。</p>
+<h2 id="zh-section-5">5. 推理流程：先 MTP，再 DFlash</h2>
+<p>每一轮生成都按图 2 的顺序执行：</p>
+<ol>
+<li><strong>MTP 生成 T1。</strong> 读取已有的 Target hidden，消费 pending token A，保留选出的 T1 以及预测它时的 MTP hidden。</li>
+<li><strong>DFlash 预测 T2～T7。</strong> 构造 <code>[T1,MASK×6]</code>，融合 E(T1) 与预测它的 MTP hidden，只替换 T1 embedding，再运行一次并行 DFlash 前向。</li>
+<li><strong>Target 统一验证。</strong> 一起验证 T1～T7，提交接受前缀及修正/bonus token，再进入下一轮。</li>
+</ol>
+<p><strong>我们在本文实验中统一使用 target-only 验证。</strong> 根据 Target 的采样结果逐 token 检验候选，接受连续匹配的前缀。Rejection sampling 和 block verify 暂未接入，我们会在后续比较它们对接受长度和吞吐的影响。</p>
+<p>运行时分别维护 MTP 与 DFlash 状态，只提交接受的历史，回退被拒绝候选产生的临时状态。</p>
+<p>新增计算包括一次 MTP 前向、首位 LM head，以及两路归一化和一次 T1 融合投影。Target context 路径保持不变，DFlash block 使用 T1 与六个 MASK，共七个输入槽位。</p>
+<p>接下来，我们重点优化状态更新、执行调度和 CUDA Graph 覆盖，减少 MTP 与 DFlash 之间的衔接开销。</p>
+<h2 id="zh-section-6">6. 推理实现与系统优化</h2>
+<p>我们保留七个候选的预算和 Target 原有的验证规则，重点优化 MTP 状态推进与 T1 准备阶段。</p>
+<h3>6.1 一轮执行：预测与状态推进分开</h3>
+<figure><a href="inference-runtime-flow.png" target="_blank" rel="noopener" title="查看原图"><img loading="lazy" src="inference-runtime-flow.png" alt="DFlash 与 DMTP 稳态执行链路，以及验证后为下一轮准备 MTP 表示的依赖关系"></a></figure>
+<p><em>虚线框表示 T1 head、embedding 与融合的组合 CUDA Graph，虚线箭头连接相邻两轮。</em></p>
+<p>Prefill 初始化三侧状态。稳态轮次开始时，我们从缓存的 MTP hidden 选出 T1，再完成 embedding、融合和 DFlash 前向。</p>
+<p>Target 验证后，我们用接受前缀、修正/bonus token 及对应的 Target hidden 推进 MTP 状态，缓存下一轮的预测表示。下一轮即可直接从 T1 head 开始。</p>
+<h3>6.2 Attention 适配：同一 backend，不同可见范围</h3>
+<p>我们继续使用 DFlash 已有的 FA3 和 CUDA Graph，并把新增 MTP 路径也接到 FA3 上。不过，两侧的可见范围不同：MTP 需要完整历史的 causal attention；DFlash 则读取相对 anchor 最近的 4096 个历史位置，以及按训练约定可见的七槽输入块。</p>
+<p>DFlash 路径通过临时页表表达历史窗口与七槽块，不搬动持久 KV，不改变 RoPE 位置，也不将 anchor-relative 窗口替换成 query-relative 窗口。MTP 路径保留原 FA3 attention 算子，针对固定八槽输入在设备端准备 metadata，避免正常步骤依赖 CPU 长度回传。</p>
+<h3>6.3 KV 生命周期：持久历史、pending 与 scratch</h3>
+<figure><a href="inference-kv-lifecycle.png" target="_blank" rel="noopener" title="查看原图"><img loading="lazy" src="inference-kv-lifecycle.png" alt="私有 MTP KV 的持久历史、pending anchor、固定八槽有效行与 scratch，以及验证后的提交和重用"></a></figure>
+<p><em>图中以接受 T1、T2 后产生 bonus B 为例，展示 MTP 状态的推进与提交。</em></p>
+<p>我们为 MTP 单独维护 KV，并额外保留 pending 槽位。原因是两侧的推进时序不同：MTP 可能已经处理了当前 anchor，而 Target 还没有。验证结束后，我们按接受结果分别更新两侧边界，只提交应该进入历史的状态。</p>
+<p>为了让不同接受长度复用同一套图，我们给每个请求预留八个 MTP 推进槽位。有效行进入历史或下一轮 pending，多余行写入私有 scratch。提交哪些状态、取哪个 hidden 作为下一轮预测表示，都由有效行数决定，scratch 输出不参与后续预测。</p>
+<h3>6.4 图执行：优化新增阶段的准备与提交</h3>
+<p>我们按有效请求数预先捕获 CUDA Graph，让融合 GEMM 只计算实际需要的行。解码时通过设备端 staging 更新固定缓冲，再回放执行图。</p>
+<p>随后，我们把 T1 head、候选写入、Target embedding 和融合算子合进一次图提交，减少 host 调度。这里只合并提交，不改变算子的依赖顺序、精度、argmax 或 TP 通信。</p>
+<div class="table-scroll" tabindex="0"><table>
+<thead>
+<tr>
+<th>部分</th>
+<th>适配或优化</th>
+<th>减少的成本</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>MTP 状态推进</td>
+<td>设备端固定八槽、私有 KV 与 graph replay</td>
+<td>正常步骤的 CPU 长度回传、pack/expand 与重复调度</td>
+</tr>
+<tr>
+<td>DFlash attention</td>
+<td>FA3 临时页表表达 anchor 窗口与块可见性</td>
+<td>避免为窗口重建或搬移持久 KV</td>
+</tr>
+<tr>
+<td>T1 准备</td>
+<td>head→候选写入→embedding→融合组合图</td>
+<td>多次 host 图提交及阶段衔接</td>
+</tr>
+<tr>
+<td>接受结果提交</td>
+<td>有效行决定历史/pending/scratch 写入与 hidden 选择</td>
+<td>动态长度的布局转换</td>
+</tr>
+</tbody></table></div>
+<h3>6.5 优化后的开销构成</h3>
+<p>经过设备端状态准备、固定布局和组合图优化，主要新增计算是<strong>一层 MTP decoder block 和选出 T1 的 LM head</strong>。MTP 仍包含全历史 causal attention、投影、归一化、MLP 和 TP 通信，其成本随上下文长度变化。</p>
+<p><strong>LM head 是后续的优化重点。</strong> 即使只生成 T1，标准 head 仍需进行全词表投影，读取大词表权重并计算 logits。</p>
+<p>我们计划借鉴 <a href="https://github.com/eagle-hq/EAGLE-4/blob/main/docs/architecture.md">EAGLE-4 的 Efficient LM Head</a>，先用低秩 head 筛选候选，再用原始 head 精确重算；也会尝试起草侧 LM head 量化，降低权重读取与投影成本。Target 验证路径保持不变，优化效果将结合接受长度和吞吐评估。</p>
+<h4>单 Anchor 的实测开销</h4>
+<p>我们在同一组四卡上，对比单 anchor T1 融合模型（step 1000）与原生 DFlash（step 3634）。Code、SWE 各取 8 条相同输入，实际 batch 为 8，开启 CUDA Graph，固定生成 512 tokens，忽略 EOS，排除前 16 轮热身后统计。</p>
+<div class="table-scroll" tabindex="0"><table>
+<thead>
+<tr>
+<th>阶段（ms／轮）</th>
+<th align="right">Code：DFlash</th>
+<th align="right">Code：单 anchor</th>
+<th align="right">SWE：DFlash</th>
+<th align="right">SWE：单 anchor</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>DFlash 图重放</td>
+<td align="right">0.386</td>
+<td align="right">0.388</td>
+<td align="right">0.442</td>
+<td align="right">0.427</td>
+</tr>
+<tr>
+<td>新增 MTP 图重放</td>
+<td align="right">—</td>
+<td align="right">0.214</td>
+<td align="right">—</td>
+<td align="right">0.283</td>
+</tr>
+<tr>
+<td>新增 T1 选词、embedding 与融合</td>
+<td align="right">—</td>
+<td align="right">0.290</td>
+<td align="right">—</td>
+<td align="right">0.274</td>
+</tr>
+<tr>
+<td><strong>整轮（含准备与验证）</strong></td>
+<td align="right"><strong>8.915</strong></td>
+<td align="right"><strong>9.318</strong></td>
+<td align="right"><strong>9.645</strong></td>
+<td align="right"><strong>10.195</strong></td>
+</tr>
+</tbody></table></div>
+<p>DFlash 图重放耗时基本不变，新增阶段主要是 MTP 和 T1 准备。整轮时间在 Code 上增加 <strong>0.403 ms</strong>，在 SWE 上增加 <strong>0.550 ms</strong>。</p>
+<h2 id="zh-section-7">7. 主方法的六类生成评测</h2>
+<p>我们的评测主要侧重<strong>长上下文 Agent 场景</strong>，同时覆盖 Code、Math 和 MT-Bench，并与 DFlash、原生 MTP 比较。按输入输出形态，前三类（Code、Math、MT-Bench）主要是<strong>短输入、长输出</strong>，后三类（Agent、SWE、Long-horizon）主要是<strong>长输入、短输出</strong>。其中，MT-Bench 用于 OOD 评测。</p>
+<p>输入长度上限为 <strong>128K</strong>，输出长度上限为 <strong>28K</strong>；各方法使用相同输入，生成温度为 1。</p>
+<div class="table-scroll" tabindex="0"><table>
+<thead>
+<tr>
+<th>负载</th>
+<th>DFlash接受长度</th>
+<th>原生MTP接受长度*</th>
+<th>DMTP接受长度</th>
+<th>DMTP相对DFlash</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Code</td>
+<td>3.239</td>
+<td>3.496</td>
+<td>3.847</td>
+<td>+18.78%</td>
+</tr>
+<tr>
+<td>Math</td>
+<td>3.497</td>
+<td>3.619</td>
+<td>4.084</td>
+<td>+16.78%</td>
+</tr>
+<tr>
+<td>MT-Bench</td>
+<td>2.849</td>
+<td>3.153</td>
+<td>3.406</td>
+<td>+19.56%</td>
+</tr>
+<tr>
+<td>Agent</td>
+<td>4.742</td>
+<td>4.201</td>
+<td>5.369</td>
+<td>+13.22%</td>
+</tr>
+<tr>
+<td>SWE</td>
+<td>3.355</td>
+<td>3.402</td>
+<td>3.935</td>
+<td>+17.29%</td>
+</tr>
+<tr>
+<td>Long-horizon</td>
+<td>4.479</td>
+<td>4.045</td>
+<td>4.894</td>
+<td>+9.25%</td>
+</tr>
+</tbody></table></div>
+<p><em>原生 MTP 提出 4 个候选，DFlash 与 DMTP 均提出 7 个候选。</em></p>
+<p><em>平均接受长度包含 Target 的修正或 bonus token。</em></p>
+<figure><a href="main-acceptance.png" target="_blank" rel="noopener" title="查看原图"><img loading="lazy" src="main-acceptance.png" alt="DMTP、DFlash与原生MTP在六类任务上的接受长度"></a></figure>
+<p><em>图 5：DMTP 在六类任务上的平均接受长度相对 DFlash 提高 9.25%～19.56%。</em></p>
+<h3>逐位置接受率</h3>
+<p>图 6 展示 T1～T7 的累计接受率。</p>
+<figure><a href="main-position-acceptance.png" target="_blank" rel="noopener" title="查看原图"><img loading="lazy" src="main-position-acceptance.png" alt="六类负载中主方法T1融合与DFlash的逐位置累计接受率"></a></figure>
+<p><em>图 6：逐位置累计接受率 P(L≥k)，即每轮验证中前 k 个 draft 候选全部接受的比例，不包含修正/bonus。评测设置同上。</em></p>
+<p>DMTP 在六类任务的 T1～T7 位置均获得了更高的累计接受率，表明首位增强与后续并行预测可以共同提升整个候选块的接受表现。</p>
+<details>
+<summary>条件接受率：已经接受前k−1个候选后，第k个继续接受的比例</summary>
+
+<figure><a href="main-position-conditional.png" target="_blank" rel="noopener" title="查看原图"><img loading="lazy" src="main-position-conditional.png" alt="主方法T1融合与DFlash的逐位置条件接受率"></a></figure>
+<div class="table-scroll" tabindex="0"><table>
+<thead>
+<tr>
+<th>数据集 / 模型</th>
+<th>验证轮数</th>
+<th>T1</th>
+<th>T2</th>
+<th>T3</th>
+<th>T4</th>
+<th>T5</th>
+<th>T6</th>
+<th>T7</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Code / DFlash</td>
+<td>523201</td>
+<td>71.00%</td>
+<td>70.38%</td>
+<td>71.64%</td>
+<td>70.79%</td>
+<td>70.43%</td>
+<td>70.91%</td>
+<td>70.97%</td>
+</tr>
+<tr>
+<td>Code / DMTP（T1融合）</td>
+<td>434780</td>
+<td>81.81%</td>
+<td>76.83%</td>
+<td>74.34%</td>
+<td>73.43%</td>
+<td>73.00%</td>
+<td>73.02%</td>
+<td>71.76%</td>
+</tr>
+<tr>
+<td>Math / DFlash</td>
+<td>473538</td>
+<td>73.73%</td>
+<td>72.93%</td>
+<td>73.82%</td>
+<td>73.87%</td>
+<td>73.36%</td>
+<td>71.90%</td>
+<td>70.59%</td>
+</tr>
+<tr>
+<td>Math / DMTP（T1融合）</td>
+<td>404689</td>
+<td>83.72%</td>
+<td>78.84%</td>
+<td>76.25%</td>
+<td>76.36%</td>
+<td>75.64%</td>
+<td>74.54%</td>
+<td>72.62%</td>
+</tr>
+<tr>
+<td>MT-Bench / DFlash</td>
+<td>54479</td>
+<td>61.36%</td>
+<td>62.04%</td>
+<td>68.34%</td>
+<td>73.36%</td>
+<td>76.38%</td>
+<td>76.11%</td>
+<td>74.92%</td>
+</tr>
+<tr>
+<td>MT-Bench / DMTP（T1融合）</td>
+<td>41259</td>
+<td>73.72%</td>
+<td>66.90%</td>
+<td>67.78%</td>
+<td>73.03%</td>
+<td>76.24%</td>
+<td>76.77%</td>
+<td>74.74%</td>
+</tr>
+<tr>
+<td>Agent / DFlash</td>
+<td>22213</td>
+<td>79.53%</td>
+<td>81.84%</td>
+<td>84.00%</td>
+<td>85.87%</td>
+<td>87.05%</td>
+<td>86.81%</td>
+<td>84.74%</td>
+</tr>
+<tr>
+<td>Agent / DMTP（T1融合）</td>
+<td>17371</td>
+<td>86.98%</td>
+<td>86.12%</td>
+<td>85.51%</td>
+<td>86.91%</td>
+<td>87.72%</td>
+<td>87.34%</td>
+<td>86.18%</td>
+</tr>
+<tr>
+<td>SWE / DFlash</td>
+<td>4795</td>
+<td>59.33%</td>
+<td>64.25%</td>
+<td>68.38%</td>
+<td>73.92%</td>
+<td>79.65%</td>
+<td>80.98%</td>
+<td>84.90%</td>
+</tr>
+<tr>
+<td>SWE / DMTP（T1融合）</td>
+<td>3836</td>
+<td>71.79%</td>
+<td>72.59%</td>
+<td>74.64%</td>
+<td>79.69%</td>
+<td>84.44%</td>
+<td>85.06%</td>
+<td>82.20%</td>
+</tr>
+<tr>
+<td>Long-horizon / DFlash</td>
+<td>2919</td>
+<td>75.13%</td>
+<td>76.84%</td>
+<td>80.18%</td>
+<td>80.01%</td>
+<td>82.89%</td>
+<td>83.71%</td>
+<td>84.40%</td>
+</tr>
+<tr>
+<td>Long-horizon / DMTP（T1融合）</td>
+<td>2798</td>
+<td>80.56%</td>
+<td>80.66%</td>
+<td>79.98%</td>
+<td>83.22%</td>
+<td>85.04%</td>
+<td>86.10%</td>
+<td>85.78%</td>
+</tr>
+</tbody></table></div>
+</details>
+
+<h3>接受长度与端到端吞吐</h3>
+<p>下表使用 B32 参考评测：DFlash 和 DMTP 在同一组四张 H200 GPU 上依次运行，使用相同 SGLang 版本与 TP4。每类任务取 64 条相同输入，温度为 1，输出上限为 28K，保留自然 EOS；服务上下文上限为 262144 tokens。图 7 进一步展示 B2～B32 的吞吐结果。</p>
+<p>评测采用动态批处理：Bn 为 batch 上限，实际 batch 随请求完成而变化。不同任务类别与 batch 设置之间清空缓存，同组请求保留正常的 radix cache 复用。下表与图 7 为端到端评测，图 5、图 6 则侧重候选接受表现。</p>
+<div class="table-scroll" tabindex="0"><table>
+<thead>
+<tr>
+<th>负载</th>
+<th>DFlash per-request</th>
+<th>DMTP per-request</th>
+<th>DFlash per-verify</th>
+<th>DMTP per-verify</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Code</td>
+<td>3.227</td>
+<td>3.814</td>
+<td>3.198</td>
+<td>3.795</td>
+</tr>
+<tr>
+<td>Math</td>
+<td>3.461</td>
+<td>4.100</td>
+<td>3.429</td>
+<td>4.056</td>
+</tr>
+<tr>
+<td>MT-Bench</td>
+<td>2.890</td>
+<td>3.459</td>
+<td>2.706</td>
+<td>3.250</td>
+</tr>
+<tr>
+<td>Agent</td>
+<td>4.795</td>
+<td>5.254</td>
+<td>4.249</td>
+<td>4.709</td>
+</tr>
+<tr>
+<td>SWE</td>
+<td>3.407</td>
+<td>3.881</td>
+<td>2.794</td>
+<td>3.173</td>
+</tr>
+<tr>
+<td>Long-horizon</td>
+<td>4.356</td>
+<td>5.022</td>
+<td>3.641</td>
+<td>4.656</td>
+</tr>
+</tbody></table></div>
+<p><strong>Per-request</strong> 为请求级平均接受长度；<strong>per-verify</strong> 为每轮验证平均推进的 token 数，计算为 <code>1 + Σ(k × histogram[k]) / Σhistogram</code>。两者均包含修正/bonus token。</p>
+<figure><a href="native-branch-throughput.png" target="_blank" rel="noopener" title="查看原图"><img loading="lazy" src="native-branch-throughput.png" alt="DFlash、公开权重 MTP415 与 DMTP 在 Code、Math、Agent 上不同 batch 设置的端到端吞吐"></a></figure>
+<p><em>图 7：DFlash、MTP415 与 DMTP 在 Code、Math、Agent 上的 TP4 E2E 吞吐，单位 tok/s，三个子图采用独立纵轴。B2/B4/B8 各取前 8 条，B16/B32 各取前 64 条，保留自然 EOS 与 28K 上限。DFlash/DMTP 的 B32 沿用同卡顺序参考评测，其他点为固定两组 TP4 并行扫描；MTP415 为独立 TP4 扫描。</em></p>
+<p>我们加入公开 Qwen3.6-35B-A3B 的原生 MTP 吞吐作为参考：四步、top-k=1、五个验证槽位，共提出四个候选，关闭 overlap。DFlash/DMTP 使用内部 Target 权重、七个候选，开启 overlap。</p>
+<p><strong>在 B32 参考评测中，DMTP 在图示三类任务上获得 17.10%～23.75% 的端到端吞吐提升。</strong> Code 从 5526.78 提升至 6564.08 tok/s（+18.77%），Math 从 6054.42 提升至 7089.92 tok/s（+17.10%），与两类任务约 18% 的 per-verify 接受长度提升相呼应。Agent 从 1016.94 提升至 1258.44 tok/s（+23.75%）。</p>
+<p>我们用总输出 token 数除以整组请求的完成时间计算 E2E 吞吐，覆盖排队、prefill 和 decode，并保留自然 EOS。</p>
+<h2 id="zh-section-8">8. 后续方向</h2>
+<p><strong>DMTP 的一个局限，是它依赖原生 MTP 的首位预测能力。</strong> 如果 MTP 在某些场景下训练不够充分，它的首 token 接受率可能低于经过任务数据微调的 DFlash。这时，直接把首位交给 MTP 未必是更好的选择。我们还需要进一步探索这种差异，以及如何通过训练和两者的协作改善这些场景。</p>
+<p>我们还想继续探索几个方向：</p>
+<ul>
+<li><strong>自适应多步 MTP。</strong> 探索自适应选择 MTP 生成步数，再由 DFlash 并行续写。</li>
+<li><strong>更强的验证方式。</strong> 在当前 target-only 验证基础上，探索 rejection sampling 与 block verify，评测其对接受长度、采样一致性及端到端吞吐的影响。</li>
+<li><strong>统一MTP与DFlash的训练范式。</strong> 能否把两者放到同一个框架下，进一步理解首token接受率和后续位置衰减差异背后的原因？</li>
+<li><strong>联合训练。</strong> MTP不一定要冻结，也可以和DFlash一起训练，研究如何在保留首位优势的同时提升整个block的预测能力。</li>
+<li><strong>多层MTP做block预测。</strong> 能否让多层MTP学习block预测，将已有的预训练能力与并行draft结合起来？</li>
+<li><strong>更大的模型。</strong> 将 DMTP 扩展到更大规模的 Target，探索不同的 MTP–DFlash 组合，检验其在更大模型上的泛化能力与加速潜力。</li>
+</ul>
+<p>DMTP 仍是一次初步探索。我们将继续分享更多模型与场景下的实验结果，相关论文与开源代码也将于近期公开。欢迎大家复现实验，分享不同模型、数据和任务上的发现，也欢迎参与训练方法与推理实现的改进，一起把这条路线探索得更清楚。</p>
+<h2 id="zh-section-9">参考资料</h2>
+<ol>
+<li><a href="https://z-lab.ai/projects/dflash/">DFlash: Block Diffusion for Flash Speculative Decoding</a></li>
+<li><a href="https://arxiv.org/abs/2607.05147">DSpark: Confidence-Scheduled Speculative Decoding with Semi-Autoregressive Generation</a></li>
+<li><a href="https://www.lmsys.org/blog/2026-08-04-specforge-v0-3">SpecForge v0.3.0</a></li>
+</ol>
+<h2 id="zh-section-10">致谢</h2>
+<p>感谢 <strong>Qwen Team、GLM/Domino Team、Qwen Application Team 和 SpecForge Team</strong> 的支持与交流。这项工作是在我于 <strong>Qwen Infra 团队实习期间</strong>完成的。</p>
+<p><strong>Qwen Team</strong>：Yuhao Shen、Di Liu、Yucheng Li、Hao Yu、Yang Xu、Xi Lin、Yi Zhang。</p>
+<p><strong>GLM/Domino Team</strong>：Jianuo Huang。</p>
+<p><strong>Qwen Application Team</strong>：Tianyu Liu、Jun Zhang。</p>
+<p><strong>SpecForge Team</strong>：Jiaping Wang。</p>
+<h2 id="zh-section-11">引用</h2>
+<p>如果这项工作对你有帮助，欢迎引用这篇技术博客：</p>
+<pre><code class="language-bibtex">@misc{shen2026dmtp,
+  author = {Shen, Piggy},
+  title  = {{DMTP}: A Better First Token for Block Drafting via MTP},
+  year   = {2026},
+  note   = {Technical blog}
+}
+</code></pre>
+</article>
+<article id="article-en" lang="en"><h1>DMTP: A Better First Token for Block Drafting via MTP</h1>
+<p><strong>Piggy Shen · October 2026 · Technical Blog</strong></p>
+<p>Speculative decoding is an important component of LLM inference infrastructure. <a href="https://z-lab.ai/projects/dflash/">DFlash</a> demonstrates the potential of parallel candidate prediction, while DeepSeek has deployed <a href="https://arxiv.org/abs/2607.05147">DSpark</a> in production and reported gains over MTP-1. Yet DFlash does not consistently outperform MTP on models with well-trained native MTP modules, such as GLM and Qwen, or on some conversation workloads.</p>
+<p>Our evaluations and discussions with Domino author Jianuo Huang highlight complementary strengths: native MTP has higher first-token acceptance, particularly on OOD workloads, while DFlash generates a longer continuation in parallel. This motivates combining pretrained first-token prediction with parallel drafting.</p>
+<p>Several approaches address the decline in acceptance at later positions within a DFlash-style block. <strong>We focus on a different question: can we improve the first draft token itself?</strong> Under prefix verification, rejecting that first candidate prevents the rest of the block from being committed. DMTP starts with a pretrained MTP prediction, then passes its hidden representation to DFlash for the continuation.</p>
+<p>We introduce <strong>DMTP</strong>: pretrained MTP proposes the first token, and DFlash generates the continuation in parallel. Our main method is <strong>MTP-style token and hidden-state fusion</strong>: independently normalize the T1 embedding and its predicting MTP hidden, concatenate them, and project the pair into the T1 input position.</p>
+<blockquote>
+<p><strong>The key idea:</strong> let MTP start the block and DFlash continue it in parallel. The two models share both a concrete candidate and a predictive representation, while retaining their original backbones.</p>
+</blockquote>
+<h2 id="en-section-0">The Key Observations</h2>
+<ul>
+<li><strong>Native MTP&#39;s first-token advantage is worth reusing.</strong> With the same Target and inputs, we observe higher first-token acceptance from MTP than DFlash. We therefore use MTP for T1 and DFlash for the remaining six parallel proposals.</li>
+<li><strong>Pass MTP&#39;s pretrained capability to DFlash through hidden states.</strong> We use MTP not only to generate T1, but also to fuse the hidden state that predicted it with its token embedding. DFlash can then use both the concrete candidate and features learned during MTP pretraining to predict the continuation in parallel.</li>
+<li><strong>The combination improves generation and complements existing optimizations.</strong> We obtain <strong>9.25%–19.56%</strong> higher acceptance length across six workloads and <strong>17.10%–23.75%</strong> higher end-to-end throughput across four workloads at B32, both relative to DFlash. DMTP changes how the two models cooperate and is orthogonal to optimizations within MTP or DFlash: stronger predictors, training methods, candidate-selection strategies, and inference kernels can be combined with this framework.</li>
+</ul>
+<h2 id="en-section-1">1. First-Token Acceptance and Parallel Drafting</h2>
+<p>Figure 1 compares <strong>DFlash and native MTP</strong> using the same target model. DFlash is trained on a mixture of tasks with 32K sequences; MTP uses the pretrained weights bundled with the same target.</p>
+<p>Both arms use the same Qwen3.6-35B-A3B target and input set across Code, Math, MT-Bench, Agent, SWE and Long-horizon. <strong>DMTP itself uses MTP for T1 and DFlash for six parallel continuation candidates.</strong></p>
+<figure><a href="first-token.png" target="_blank" rel="noopener" title="View full-size figure"><img loading="lazy" src="first-token.png" alt="DFlash and native MTP first-position acceptance across six workloads"></a></figure>
+<p><em>Figure 1. First-token acceptance across six workloads on Qwen3.6-35B-A3B at a generation temperature of 1.</em></p>
+<p>On Code, first-position acceptance is 71.00% for DFlash and 82.32% for MTP.</p>
+<p><strong>We see extensive pretraining as an important source of MTP&#39;s first-token advantage.</strong> Native MTP learns alongside the target from much more data than our separately trained DFlash draft. That gives us a reason to preserve its first-token predictor rather than train a replacement.</p>
+<h2 id="en-section-2">2. DMTP: MTP Starts, DFlash Continues</h2>
+<p>The division of labor is straightforward:</p>
+<pre><code class="language-text">MTP:     propose T1
+DFlash:  condition on T1 and propose T2–T7 in one forward pass
+Target:  verify seven candidates and commit the accepted prefix plus correction/bonus
+</code></pre>
+<figure><a href="architecture.png" target="_blank" rel="noopener" title="View full-size figure"><img loading="lazy" src="architecture.png" alt="MTP-style token and hidden-state fusion at the first candidate input position"></a></figure>
+<p><em>Figure 2. Original DFlash (top) and DMTP (bottom). DMTP fuses the MTP hidden that predicts T1 with its token embedding, then predicts T2–T7 in parallel. The original target-context-to-KV path is retained; the T1 embedding comes from a token lookup.</em></p>
+<p>We chose this division of labor for three reasons.</p>
+<p><strong>Preserve first-token prediction.</strong> We freeze native MTP to retain its pretrained first-step capability and train the parallel continuation separately.</p>
+<p><strong>Shorten the prediction distance.</strong> Given T1, T2 becomes the first unknown token after the new anchor, from which DFlash predicts the continuation in parallel.</p>
+<p><strong>Transfer pretrained features.</strong> Alongside T1, we pass the MTP hidden that predicted it so DFlash can use those features to predict subsequent tokens.</p>
+<h3>Single-Step MTP Drafting</h3>
+<p>We use MTP only for T1 to control serial drafting cost. Additional MTP candidates require successive forward passes and token selection, whereas DFlash predicts the remaining six in one parallel pass.</p>
+<h2 id="en-section-3">3. MTP Hidden-State Integration and Ablations</h2>
+<p>We use <strong>MTP-style token and hidden-state fusion</strong> and compare alternative representation interfaces through ablations.</p>
+<p>Let <span class="inline-math"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>A</mi><mo>=</mo><msub><mi>x</mi><mi>a</mi></msub></mrow><annotation encoding="application/x-tex">A = x_a</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6833em;"></span><span class="mord mathnormal">A</span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.5806em;vertical-align:-0.15em;"></span><span class="mord"><span class="mord mathnormal">x</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.1514em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">a</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span></span></span></span></span> be the pending target-produced token. Target context ends at <span class="inline-math"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>x</mi><mrow><mi>a</mi><mo>−</mo><mn>1</mn></mrow></msub></mrow><annotation encoding="application/x-tex">x_{a-1}</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6389em;vertical-align:-0.2083em;"></span><span class="mord"><span class="mord mathnormal">x</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3011em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight">a</span><span class="mbin mtight">−</span><span class="mord mtight">1</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2083em;"><span></span></span></span></span></span></span></span></span></span></span>. Native MTP consumes <span class="inline-math"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>A</mi></mrow><annotation encoding="application/x-tex">A</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6833em;"></span><span class="mord mathnormal">A</span></span></span></span></span> and the preceding target hidden, producing the representation that predicts <span class="inline-math"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>T</mi><mn>1</mn></msub><mo>=</mo><msub><mi>x</mi><mrow><mi>a</mi><mo>+</mo><mn>1</mn></mrow></msub></mrow><annotation encoding="application/x-tex">T_1 = x_{a+1}</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.8333em;vertical-align:-0.15em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.13889em;">T</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3011em;"><span style="top:-2.55em;margin-left:-0.1389em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight">1</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:0.6389em;vertical-align:-0.2083em;"></span><span class="mord"><span class="mord mathnormal">x</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3011em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mathnormal mtight">a</span><span class="mbin mtight">+</span><span class="mord mtight">1</span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2083em;"><span></span></span></span></span></span></span></span></span></span></span>. No target hidden for <span class="inline-math"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>A</mi></mrow><annotation encoding="application/x-tex">A</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.6833em;"></span><span class="mord mathnormal">A</span></span></span></span></span> or <span class="inline-math"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><msub><mi>T</mi><mn>1</mn></msub></mrow><annotation encoding="application/x-tex">T_1</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.8333em;vertical-align:-0.15em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.13889em;">T</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3011em;"><span style="top:-2.55em;margin-left:-0.1389em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight">1</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span></span></span></span></span> is required.</p>
+<p>Fusion reads <strong>the MTP hidden that predicted T1</strong>, not one computed after consuming T1:</p>
+<div class="equation"><span class="katex-display"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><msub><mover accent="true"><mi mathvariant="bold">e</mi><mo stretchy="true">~</mo></mover><msub><mi>T</mi><mn>1</mn></msub></msub><mo>=</mo><msub><mi>W</mi><mi>f</mi></msub><mrow><mo fence="true">[</mo><msub><mrow><mi mathvariant="normal">RMS</mi><mo>⁡</mo></mrow><mi>e</mi></msub><mo stretchy="false">(</mo><msub><mi mathvariant="bold">e</mi><msub><mi>T</mi><mn>1</mn></msub></msub><mo stretchy="false">)</mo><mo separator="true">;</mo><msub><mrow><mi mathvariant="normal">RMS</mi><mo>⁡</mo></mrow><mi>m</mi></msub><mo stretchy="false">(</mo><msub><mi mathvariant="bold">h</mi><mrow><mi mathvariant="normal">M</mi><mi mathvariant="normal">T</mi><mi mathvariant="normal">P</mi></mrow></msub><mo stretchy="false">)</mo><mo fence="true">]</mo></mrow><mi mathvariant="normal">.</mi></mrow><annotation encoding="application/x-tex">\widetilde{\mathbf e}_{T_1}=W_f\left[\operatorname{RMS}_e(\mathbf e_{T_1});\operatorname{RMS}_m(\mathbf h_{\mathrm{MTP}})\right].</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.9545em;vertical-align:-0.2501em;"></span><span class="mord"><span class="mord accent"><span class="vlist-t"><span class="vlist-r"><span class="vlist" style="height:0.7044em;"><span style="top:-3em;"><span class="pstrut" style="height:3em;"></span><span class="mord mathbf">e</span></span><span class="svg-align" style="width:calc(100% - 0.1111em);margin-left:0.1111em;top:-3.4444em;"><span class="pstrut" style="height:3em;"></span><span style="height:0.26em;"><svg xmlns="http://www.w3.org/2000/svg" width="100%" height="0.26em" viewBox="0 0 600 260" preserveAspectRatio="none"><path d="M200 55.538c-77 0-168 73.953-177 73.953-3 0-7
+-2.175-9-5.437L2 97c-1-2-2-4-2-6 0-4 2-7 5-9l20-12C116 12 171 0 207 0c86 0
+ 114 68 191 68 78 0 168-68 177-68 4 0 7 2 9 5l12 19c1 2.175 2 4.35 2 6.525 0
+ 4.35-2 7.613-5 9.788l-19 13.05c-92 63.077-116.937 75.308-183 76.128
+-68.267.847-113-73.952-191-73.952z"/></svg></span></span></span></span></span></span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3283em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mtight"><span class="mord mathnormal mtight" style="margin-right:0.13889em;">T</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3173em;"><span style="top:-2.357em;margin-left:-0.1389em;margin-right:0.0714em;"><span class="pstrut" style="height:2.5em;"></span><span class="sizing reset-size3 size1 mtight"><span class="mord mtight">1</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.143em;"><span></span></span></span></span></span></span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2501em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.2778em;"></span><span class="mrel">=</span><span class="mspace" style="margin-right:0.2778em;"></span></span><span class="base"><span class="strut" style="height:1.0361em;vertical-align:-0.2861em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.13889em;">W</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3361em;"><span style="top:-2.55em;margin-left:-0.1389em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight" style="margin-right:0.10764em;">f</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2861em;"><span></span></span></span></span></span></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="minner"><span class="mopen delimcenter" style="top:0em;">[</span><span class="mop"><span class="mop"><span class="mord mathrm">RMS</span></span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.1514em;"><span style="top:-2.55em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">e</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mopen">(</span><span class="mord"><span class="mord mathbf">e</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3283em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mtight"><span class="mord mathnormal mtight" style="margin-right:0.13889em;">T</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3173em;"><span style="top:-2.357em;margin-left:-0.1389em;margin-right:0.0714em;"><span class="pstrut" style="height:2.5em;"></span><span class="sizing reset-size3 size1 mtight"><span class="mord mtight">1</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.143em;"><span></span></span></span></span></span></span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.2501em;"><span></span></span></span></span></span></span><span class="mclose">)</span><span class="mpunct">;</span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mop"><span class="mop"><span class="mord mathrm">RMS</span></span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.1514em;"><span style="top:-2.55em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mathnormal mtight">m</span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mopen">(</span><span class="mord"><span class="mord mathbf">h</span><span class="msupsub"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.3283em;"><span style="top:-2.55em;margin-left:0em;margin-right:0.05em;"><span class="pstrut" style="height:2.7em;"></span><span class="sizing reset-size6 size3 mtight"><span class="mord mtight"><span class="mord mtight"><span class="mord mathrm mtight">MTP</span></span></span></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.15em;"><span></span></span></span></span></span></span><span class="mclose">)</span><span class="mclose delimcenter" style="top:0em;">]</span></span><span class="mspace" style="margin-right:0.1667em;"></span><span class="mord">.</span></span></span></span></span></div>
+
+<p>Each 2048-dimensional input has its own learned RMSNorm, followed by a 4096→2048 linear projection. The input is <code>[T1,MASK×6]</code>, with only the T1 embedding replaced. All six MASK embeddings, the original prediction head, and the target-context FC→KV path stay unchanged; no MTP KV slot is added.</p>
+<h3>The MTP-Style Fusion Interface</h3>
+<p>We follow native MTP&#39;s normalization-and-projection pattern, with separately trained fusion parameters. E(T1) identifies the candidate, MTP hidden provides predictive features, and all six MASK queries attend to the fused T1.</p>
+<p>The change is confined to T1&#39;s input. Historical features, the target-context pathway, the DFlash backbone, and the proposal budget remain unchanged.</p>
+<h3>Single-Anchor Conditioning</h3>
+<blockquote>
+<p><strong>One anchor, seven proposals.</strong> T1 is the only DFlash anchor; DFlash predicts T2–T7 in parallel. T1 can still be rejected. The seven proposals are T1–T7.</p>
+</blockquote>
+<p>MTP still consumes A and produces T1 and its predicting hidden state; DFlash receives only the fused T1 and six MASKs. Target context ends before A, with no additional Target forward required.</p>
+<p><strong>Two anchors means retaining both the original anchor A and the MTP proposal T1 before the MASK positions.</strong> The input is <code>[A,T1,MASK×6]</code>, rather than the single-anchor <code>[T1,MASK×6]</code>. The extra E(A) lets MASK queries directly access the original anchor&#39;s token embedding through attention. A has already been emitted and is not a new proposal.</p>
+<p>We choose the single-anchor layout for similar performance with fewer changes: replace the original anchor with T1 and retain the anchor-plus-MASK structure. MASK embeddings, parallel prediction, and the original output head stay unchanged, making continued fine-tuning of an existing DFlash straightforward.</p>
+<figure><a href="anchor-layout.png" target="_blank" rel="noopener" title="View full-size figure"><img loading="lazy" src="anchor-layout.png" alt="T1 as the only anchor, followed by six supervised MASK positions"></a></figure>
+<p><em>Figure 3a. Seven input slots, seven proposals: T1 comes from MTP and T2–T7 come from DFlash. The known T1 slot receives no draft prediction loss.</em></p>
+<h3>Ablation Design</h3>
+<ul>
+<li><strong>Original DFlash:</strong> single-anchor external baseline with <code>[A,MASK×7]</code>; DFlash proposes all seven candidates.</li>
+<li><strong>Candidate-conditioned single-anchor drafting:</strong> <code>[T1,MASK×6]</code>, without additional MTP state injection; original target context remains available.</li>
+<li><strong>Hidden-state residual at the first candidate:</strong> project MTP hidden through a low-rank network and add the residual only to the T1 embedding; all six mask inputs stay unchanged.</li>
+<li><strong>MTP-style token and hidden-state fusion (main method):</strong> independently normalize and concatenate MTP hidden and E(T1), then project to replace only the T1 embedding.</li>
+</ul>
+<p>Supplementary controls are a hidden-state residual at six mask positions, target and MTP context fusion, and MTP-only context. Context fusion concatenates five target feature streams and aligned MTP features, then projects 6H→H. These representation-interface comparisons all use T1 as their only anchor.</p>
+<figure><a href="injection-variants.png" target="_blank" rel="noopener" title="View full-size figure"><img loading="lazy" src="injection-variants.png" alt="The four main-table methods: original DFlash, candidate conditioning, first-candidate hidden-state residual, and token and hidden-state fusion"></a></figure>
+<p><em>Figure 3b. Only the four main-table methods: original DFlash, candidate-conditioned single-anchor drafting, a hidden-state residual at the first candidate, and MTP-style token and hidden-state fusion. All retain the original target-context pathway and the same seven-candidate budget. The final two compare additive residual injection with replacement-style fusion at the first candidate input.</em></p>
+<h3>Inference Ablation: Code Acceptance Length</h3>
+<p>We compare representation interfaces on the same eight code-task inputs, holding the models, candidate count, and generation settings fixed.</p>
+<div class="table-scroll" tabindex="0"><table>
+<thead>
+<tr>
+<th>Method</th>
+<th>Representation interface</th>
+<th>Code length</th>
+<th>vs candidate conditioning</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Original DFlash</td>
+<td>Single anchor; seven proposals</td>
+<td>3.360</td>
+<td>-10.89%</td>
+</tr>
+<tr>
+<td>Candidate-conditioned single-anchor drafting</td>
+<td>Condition on the proposed token without extra state injection</td>
+<td>3.770</td>
+<td>+0.00%</td>
+</tr>
+<tr>
+<td>Hidden-state residual at the first candidate</td>
+<td>Add a residual only at the first candidate input</td>
+<td>3.864</td>
+<td>+2.48%</td>
+</tr>
+<tr>
+<td>MTP-style token and hidden-state fusion (two anchors)</td>
+<td>Original A plus fused T1: [A,T1,MASK×6]</td>
+<td>3.951</td>
+<td>+4.80%</td>
+</tr>
+<tr>
+<td><strong>MTP-style token and hidden-state fusion (main method)</strong></td>
+<td><strong>Replace only the first candidate input representation</strong></td>
+<td>3.963</td>
+<td>+5.12%</td>
+</tr>
+</tbody></table></div>
+<p><strong>Two anchors reach an acceptance length of 3.951, essentially matching the single-anchor main method at 3.963.</strong> We therefore choose one anchor, preserving DFlash&#39;s original anchor-plus-MASK structure with fewer interface changes.</p>
+<p><strong>Adding MTP hidden raises acceptance length from 3.770 to 3.963 (+5.12%).</strong> Token and hidden-state fusion performs best in this Code ablation, so we choose it as our main method.</p>
+<p><em>Acceptance lengths are averaged over eight Code requests and include target correction/bonus tokens. The main table uses a common inference implementation; the supplementary six-mask residual uses a separate implementation as an auxiliary comparison.</em></p>
+<details>
+<summary>Supplement: other uses of MTP hidden</summary>
+
+<div class="table-scroll" tabindex="0"><table>
+<thead>
+<tr>
+<th>Method</th>
+<th>Representation interface</th>
+<th>Code length</th>
+<th>vs candidate conditioning</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Hidden-state residual at six mask positions</td>
+<td>Add an MTP hidden-state residual to six mask inputs</td>
+<td>3.842</td>
+<td>+1.92%</td>
+</tr>
+<tr>
+<td>Target and MTP context fusion</td>
+<td>Concatenate and project target and MTP features</td>
+<td>3.714</td>
+<td>-1.49%</td>
+</tr>
+<tr>
+<td>MTP-only context</td>
+<td>Supply context from position-aligned MTP features</td>
+<td>3.565</td>
+<td>-5.43%</td>
+</tr>
+</tbody></table></div>
+</details>
+
+<h3>Compatibility with Existing Drafting Methods</h3>
+<p>We retain DFlash&#39;s backbone, output head, and target-context interface. With a compatible configuration, we can continue fine-tuning existing DFlash weights, add the T1 fusion module, and supervise the six continuation positions using <code>[T1,MASK×6]</code>. Target and MTP remain frozen.</p>
+<p>This interface is orthogonal to optimizations within MTP or DFlash and can incorporate stronger predictors, training methods, path selectors, and inference kernels.</p>
+<h3>Why Preserve Pretrained MTP?</h3>
+<p>We also tried repurposing MTP layers for DFlash-style parallel prediction, but saw first-position performance affected and limited convergence gains. We therefore chose to freeze pretrained MTP and train parallel continuation around its T1 proposal.</p>
+<h2 id="en-section-4">4. Training DMTP</h2>
+<p>We use Qwen3.6-35B-A3B with 32K training contexts and approximately 250K records, predominantly from Agent and Long-horizon scenarios. We use MT-Bench as an out-of-distribution (OOD) evaluation to examine generalization beyond the training distribution.</p>
+<p>Training follows three steps:</p>
+<ol>
+<li><strong>Extract frozen features.</strong> Target processes the training sequence. At each block boundary, MTP consumes A and the preceding target hidden to obtain the representation for predicting T1. DFlash context uses only target features before A.</li>
+<li><strong>Build the draft input.</strong> Use <code>[T1,MASK×6]</code> with the dataset&#39;s T1. Independently normalize E(T1) and its predicting MTP hidden, concatenate, and project to replace the T1 embedding. All six MASK embeddings remain unchanged.</li>
+<li><strong>Optimize the continuation.</strong> DFlash learns T2–T7 with the original position-decayed CE objective. Target and MTP stay frozen; only DFlash and the T1 fusion module are updated. The known T1 input slot receives no draft prediction loss.</li>
+</ol>
+<p>We use <mark>GT T1</mark> during training and MTP-generated T1 during inference, so that train–inference difference remains. We keep the hidden-state timing consistent: both use the MTP representation that predicts T1, not the hidden obtained after consuming it.</p>
+<h2 id="en-section-5">5. Inference: MTP First, DFlash Second</h2>
+<p>Each generation round follows the order in Figure 2:</p>
+<ol>
+<li><strong>MTP proposes T1.</strong> Read the available target hidden and consume pending token A. Keep both the selected T1 and the MTP hidden that predicted it.</li>
+<li><strong>DFlash predicts T2–T7.</strong> Form <code>[T1,MASK×6]</code>, fuse E(T1) with its predicting MTP hidden, replace only the T1 embedding, and run one parallel DFlash forward.</li>
+<li><strong>Target verifies the block.</strong> Verify T1–T7 together, commit the accepted prefix and correction/bonus token, then advance to the next round.</li>
+</ol>
+<p><strong>We use target-only verification throughout these experiments.</strong> We check candidates token by token against Target samples and accept the consecutive matching prefix. We have not yet integrated rejection sampling or block verify; we plan to compare their effects on acceptance length and throughput.</p>
+<p>The runtime keeps MTP and DFlash state separate, commits only accepted history, and rolls back rejected candidates.</p>
+<p>The additional computation consists of an MTP forward, its first-token LM head, two normalizations, and a T1 fusion projection. The target-context pathway remains unchanged; DFlash uses seven input slots: T1 and six MASKs.</p>
+<p>We next focus on state updates, execution scheduling, and CUDA Graph coverage to reduce the handoff cost between MTP and DFlash.</p>
+<h2 id="en-section-6">6. Inference Implementation and Systems Optimizations</h2>
+<p>We retain the seven-candidate budget and Target&#39;s verification rules, and focus our systems changes on MTP state advancement and T1 preparation.</p>
+<h3>6.1 Separating Prediction from State Advancement</h3>
+<figure><a href="inference-runtime-flow.png" target="_blank" rel="noopener" title="View full-size figure"><img loading="lazy" src="inference-runtime-flow.png" alt="Steady-state DFlash and DMTP execution, including verification-dependent MTP state advancement for the next round"></a></figure>
+<p><em>The dashed frame groups the T1 head, embedding, and fusion in one CUDA Graph; the dashed arrow connects adjacent rounds.</em></p>
+<p>Prefill initializes all three models&#39; states. Each steady-state round selects T1 from the cached MTP hidden, then runs embedding, fusion, and the DFlash forward.</p>
+<p>After Target verification, we advance MTP state using the accepted prefix, correction/bonus token, and corresponding Target hidden states. We cache the next prediction representation so the following round starts directly at the T1 head.</p>
+<h3>6.2 Attention: One Backend, Different Visibility Rules</h3>
+<p>We keep DFlash&#39;s existing FA3 and CUDA Graph support and use FA3 for the added MTP path as well. The two paths need different visibility rules: MTP reads full history causally, while DFlash reads the last 4096 positions relative to the anchor and its seven-slot block with the visibility used in training.</p>
+<p>Temporary DFlash page tables express this visibility without moving persistent KV, changing RoPE positions, or replacing the anchor-relative window with a query-relative one. The MTP path retains the native FA3 operator and prepares fixed-eight-slot metadata on device, avoiding CPU length transfers on normal steps.</p>
+<h3>6.3 KV Lifetime: Persistent History, Pending, and Scratch</h3>
+<figure><a href="inference-kv-lifecycle.png" target="_blank" rel="noopener" title="View full-size figure"><img loading="lazy" src="inference-kv-lifecycle.png" alt="Private MTP KV lifetime: persistent history, pending anchor, valid eight-slot rows, scratch, and verification-dependent commit"></a></figure>
+<p><em>MTP state advancement and commit, illustrated with T1 and T2 accepted and bonus B produced.</em></p>
+<p>We maintain a separate KV cache for MTP, with an additional pending slot, because the two models advance at different times: MTP may have processed the current anchor while Target has not. After verification, we update their boundaries separately and commit only the states that belong in history.</p>
+<p>We reserve eight MTP advancement slots per request so different acceptance lengths can reuse the same graphs. Valid rows enter history or the next pending slot; extra rows go to private scratch. The valid-row count determines what we commit and which hidden state predicts the next T1. Scratch outputs do not enter subsequent predictions.</p>
+<h3>6.4 Graph Execution: Preparation and Submission</h3>
+<p>We pre-capture CUDA Graphs for exact request counts so the fusion GEMM computes only the active rows. During decoding, we update fixed buffers through device staging and replay the graph.</p>
+<p>We then combine the T1 head, candidate write, Target embedding, and fusion into one graph submission to reduce host scheduling. We merge submissions without changing operator dependencies, precision, argmax behavior, or TP communication.</p>
+<div class="table-scroll" tabindex="0"><table>
+<thead>
+<tr>
+<th>Component</th>
+<th>Adaptation or optimization</th>
+<th>Cost reduced</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>MTP advancement</td>
+<td>Device-side fixed eight slots, private KV, graph replay</td>
+<td>Normal-step CPU length transfers, pack/expand, repeated scheduling</td>
+</tr>
+<tr>
+<td>DFlash attention</td>
+<td>Temporary FA3 pages for anchor window and block visibility</td>
+<td>Rebuilding or moving persistent KV for the window</td>
+</tr>
+<tr>
+<td>T1 preparation</td>
+<td>Combined head→candidate write→embedding→fusion graph</td>
+<td>Multiple host graph submissions and handoffs</td>
+</tr>
+<tr>
+<td>Accepted-state commit</td>
+<td>Valid rows select history/pending/scratch writes and predictor hidden</td>
+<td>Dynamic-length layout conversion</td>
+</tr>
+</tbody></table></div>
+<h3>6.5 Cost Structure After Optimization</h3>
+<p>After device-side preparation, fixed layouts, and combined graph execution, the main added computation is <strong>one MTP decoder block and the LM head that selects T1</strong>. The block includes full-history causal attention, projections, normalization, MLP, and TP communication, so its cost varies with context length.</p>
+<p><strong>The LM head is a priority for further optimization.</strong> Even for a single T1, a standard head reads the large vocabulary matrix and computes full-vocabulary logits.</p>
+<p>We plan to explore <a href="https://github.com/eagle-hq/EAGLE-4/blob/main/docs/architecture.md">EAGLE-4&#39;s Efficient LM Head</a>, using a low-rank head to shortlist candidates before exact rescoring, as well as drafting-side head quantization to reduce weight traffic and projection cost. Target verification stays unchanged; we will evaluate both acceptance length and throughput.</p>
+<h4>Measured Single-Anchor Overhead</h4>
+<p>We compare single-anchor T1 fusion at step 1000 with native DFlash at step 3634 on the same four GPUs and Target. Code and SWE each use eight identical inputs, actual batch size eight, and CUDA Graphs. We generate exactly 512 tokens with EOS ignored and exclude the first 16 warmup rounds.</p>
+<div class="table-scroll" tabindex="0"><table>
+<thead>
+<tr>
+<th>Stage (ms/round)</th>
+<th align="right">Code: DFlash</th>
+<th align="right">Code: single anchor</th>
+<th align="right">SWE: DFlash</th>
+<th align="right">SWE: single anchor</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>DFlash graph replay</td>
+<td align="right">0.386</td>
+<td align="right">0.388</td>
+<td align="right">0.442</td>
+<td align="right">0.427</td>
+</tr>
+<tr>
+<td>Additional MTP graph replay</td>
+<td align="right">—</td>
+<td align="right">0.214</td>
+<td align="right">—</td>
+<td align="right">0.283</td>
+</tr>
+<tr>
+<td>Additional T1 selection, embedding, and fusion</td>
+<td align="right">—</td>
+<td align="right">0.290</td>
+<td align="right">—</td>
+<td align="right">0.274</td>
+</tr>
+<tr>
+<td><strong>Whole round, including preparation and verification</strong></td>
+<td align="right"><strong>8.915</strong></td>
+<td align="right"><strong>9.318</strong></td>
+<td align="right"><strong>9.645</strong></td>
+<td align="right"><strong>10.195</strong></td>
+</tr>
+</tbody></table></div>
+<p>DFlash replay time is essentially unchanged; the added stages are mainly MTP and T1 preparation. The whole-round interval increases by <strong>0.403 ms on Code</strong> and <strong>0.550 ms on SWE</strong>.</p>
+<h2 id="en-section-7">7. Main-Method Evaluation Across Six Workloads</h2>
+<p>Our evaluation focuses on <strong>long-context agent workloads</strong>, with additional coverage of Code, Math, and MT-Bench, comparing DMTP against DFlash and native MTP. The first three workloads (Code, Math, MT-Bench) primarily have <strong>short inputs and long outputs</strong>; the latter three (Agent, SWE, Long-horizon) primarily have <strong>long inputs and short outputs</strong>. MT-Bench serves as the OOD evaluation.</p>
+<p>Inputs are capped at <strong>128K tokens</strong> and outputs at <strong>28K tokens</strong>. All methods use the same inputs at a generation temperature of 1.</p>
+<div class="table-scroll" tabindex="0"><table>
+<thead>
+<tr>
+<th>Workload</th>
+<th>DFlash length</th>
+<th>Native MTP length*</th>
+<th>DMTP length</th>
+<th>DMTP vs DFlash</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Code</td>
+<td>3.239</td>
+<td>3.496</td>
+<td>3.847</td>
+<td>+18.78%</td>
+</tr>
+<tr>
+<td>Math</td>
+<td>3.497</td>
+<td>3.619</td>
+<td>4.084</td>
+<td>+16.78%</td>
+</tr>
+<tr>
+<td>MT-Bench</td>
+<td>2.849</td>
+<td>3.153</td>
+<td>3.406</td>
+<td>+19.56%</td>
+</tr>
+<tr>
+<td>Agent</td>
+<td>4.742</td>
+<td>4.201</td>
+<td>5.369</td>
+<td>+13.22%</td>
+</tr>
+<tr>
+<td>SWE</td>
+<td>3.355</td>
+<td>3.402</td>
+<td>3.935</td>
+<td>+17.29%</td>
+</tr>
+<tr>
+<td>Long-horizon</td>
+<td>4.479</td>
+<td>4.045</td>
+<td>4.894</td>
+<td>+9.25%</td>
+</tr>
+</tbody></table></div>
+<p><em>Native MTP proposes four candidates; DFlash and DMTP each propose seven.</em></p>
+<p><em>Mean acceptance length includes the target correction or bonus token.</em></p>
+<figure><a href="main-acceptance.png" target="_blank" rel="noopener" title="View full-size figure"><img loading="lazy" src="main-acceptance.png" alt="Acceptance length of DMTP, DFlash and native MTP across six workloads"></a></figure>
+<p><em>Figure 5. DMTP improves mean acceptance length by 9.25%–19.56% over DFlash across six workloads.</em></p>
+<h3>Position-Wise Acceptance</h3>
+<p>Figure 6 shows cumulative acceptance from T1 through T7.</p>
+<figure><a href="main-position-acceptance.png" target="_blank" rel="noopener" title="View full-size figure"><img loading="lazy" src="main-position-acceptance.png" alt="Position-wise cumulative acceptance for DFlash and main-method T1-fusion DMTP"></a></figure>
+<p><em>Figure 6. Cumulative acceptance P(L≥k): the fraction of verification rounds accepting the first k draft candidates, excluding correction/bonus tokens. Evaluation settings are unchanged.</em></p>
+<p>DMTP achieves higher cumulative acceptance at every position from T1 to T7 across all six workloads, showing how a stronger first proposal and conditioned parallel prediction improve acceptance throughout the candidate block.</p>
+<details>
+<summary>Conditional acceptance: accepting candidate k given that the first k−1 were accepted</summary>
+
+<figure><a href="main-position-conditional.png" target="_blank" rel="noopener" title="View full-size figure"><img loading="lazy" src="main-position-conditional.png" alt="Position-wise conditional acceptance for DFlash and main-method T1-fusion DMTP"></a></figure>
+<div class="table-scroll" tabindex="0"><table>
+<thead>
+<tr>
+<th>Workload / model</th>
+<th>Verify rounds</th>
+<th>T1</th>
+<th>T2</th>
+<th>T3</th>
+<th>T4</th>
+<th>T5</th>
+<th>T6</th>
+<th>T7</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Code / DFlash</td>
+<td>523201</td>
+<td>71.00%</td>
+<td>70.38%</td>
+<td>71.64%</td>
+<td>70.79%</td>
+<td>70.43%</td>
+<td>70.91%</td>
+<td>70.97%</td>
+</tr>
+<tr>
+<td>Code / DMTP (T1 fusion)</td>
+<td>434780</td>
+<td>81.81%</td>
+<td>76.83%</td>
+<td>74.34%</td>
+<td>73.43%</td>
+<td>73.00%</td>
+<td>73.02%</td>
+<td>71.76%</td>
+</tr>
+<tr>
+<td>Math / DFlash</td>
+<td>473538</td>
+<td>73.73%</td>
+<td>72.93%</td>
+<td>73.82%</td>
+<td>73.87%</td>
+<td>73.36%</td>
+<td>71.90%</td>
+<td>70.59%</td>
+</tr>
+<tr>
+<td>Math / DMTP (T1 fusion)</td>
+<td>404689</td>
+<td>83.72%</td>
+<td>78.84%</td>
+<td>76.25%</td>
+<td>76.36%</td>
+<td>75.64%</td>
+<td>74.54%</td>
+<td>72.62%</td>
+</tr>
+<tr>
+<td>MT-Bench / DFlash</td>
+<td>54479</td>
+<td>61.36%</td>
+<td>62.04%</td>
+<td>68.34%</td>
+<td>73.36%</td>
+<td>76.38%</td>
+<td>76.11%</td>
+<td>74.92%</td>
+</tr>
+<tr>
+<td>MT-Bench / DMTP (T1 fusion)</td>
+<td>41259</td>
+<td>73.72%</td>
+<td>66.90%</td>
+<td>67.78%</td>
+<td>73.03%</td>
+<td>76.24%</td>
+<td>76.77%</td>
+<td>74.74%</td>
+</tr>
+<tr>
+<td>Agent / DFlash</td>
+<td>22213</td>
+<td>79.53%</td>
+<td>81.84%</td>
+<td>84.00%</td>
+<td>85.87%</td>
+<td>87.05%</td>
+<td>86.81%</td>
+<td>84.74%</td>
+</tr>
+<tr>
+<td>Agent / DMTP (T1 fusion)</td>
+<td>17371</td>
+<td>86.98%</td>
+<td>86.12%</td>
+<td>85.51%</td>
+<td>86.91%</td>
+<td>87.72%</td>
+<td>87.34%</td>
+<td>86.18%</td>
+</tr>
+<tr>
+<td>SWE / DFlash</td>
+<td>4795</td>
+<td>59.33%</td>
+<td>64.25%</td>
+<td>68.38%</td>
+<td>73.92%</td>
+<td>79.65%</td>
+<td>80.98%</td>
+<td>84.90%</td>
+</tr>
+<tr>
+<td>SWE / DMTP (T1 fusion)</td>
+<td>3836</td>
+<td>71.79%</td>
+<td>72.59%</td>
+<td>74.64%</td>
+<td>79.69%</td>
+<td>84.44%</td>
+<td>85.06%</td>
+<td>82.20%</td>
+</tr>
+<tr>
+<td>Long-horizon / DFlash</td>
+<td>2919</td>
+<td>75.13%</td>
+<td>76.84%</td>
+<td>80.18%</td>
+<td>80.01%</td>
+<td>82.89%</td>
+<td>83.71%</td>
+<td>84.40%</td>
+</tr>
+<tr>
+<td>Long-horizon / DMTP (T1 fusion)</td>
+<td>2798</td>
+<td>80.56%</td>
+<td>80.66%</td>
+<td>79.98%</td>
+<td>83.22%</td>
+<td>85.04%</td>
+<td>86.10%</td>
+<td>85.78%</td>
+</tr>
+</tbody></table></div>
+</details>
+
+<h3>Acceptance Length and End-to-End Throughput</h3>
+<p>The table uses the B32 reference evaluation: DFlash and DMTP run sequentially on the same four H200 GPUs, with a common SGLang version and TP4. Each workload uses 64 identical inputs, temperature 1, natural EOS, a 28K output cap, and a server context limit of 262144 tokens. Figure 7 extends the throughput comparison across B2–B32.</p>
+<p>Dynamic batching allows the active batch to vary as requests complete; Bn specifies its upper limit. Cache is cleared between workloads and batch settings, with normal radix-cache reuse within each case. The table and Figure 7 evaluate the complete serving pipeline separately from the acceptance analysis in Figures 5 and 6.</p>
+<div class="table-scroll" tabindex="0"><table>
+<thead>
+<tr>
+<th>Workload</th>
+<th>DFlash per-request</th>
+<th>DMTP per-request</th>
+<th>DFlash per-verify</th>
+<th>DMTP per-verify</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Code</td>
+<td>3.227</td>
+<td>3.814</td>
+<td>3.198</td>
+<td>3.795</td>
+</tr>
+<tr>
+<td>Math</td>
+<td>3.461</td>
+<td>4.100</td>
+<td>3.429</td>
+<td>4.056</td>
+</tr>
+<tr>
+<td>MT-Bench</td>
+<td>2.890</td>
+<td>3.459</td>
+<td>2.706</td>
+<td>3.250</td>
+</tr>
+<tr>
+<td>Agent</td>
+<td>4.795</td>
+<td>5.254</td>
+<td>4.249</td>
+<td>4.709</td>
+</tr>
+<tr>
+<td>SWE</td>
+<td>3.407</td>
+<td>3.881</td>
+<td>2.794</td>
+<td>3.173</td>
+</tr>
+<tr>
+<td>Long-horizon</td>
+<td>4.356</td>
+<td>5.022</td>
+<td>3.641</td>
+<td>4.656</td>
+</tr>
+</tbody></table></div>
+<p><strong>Per-request</strong> averages acceptance length across requests. <strong>Per-verify</strong> measures mean token advancement per verification round: <code>1 + Σ(k × histogram[k]) / Σhistogram</code>. Both include correction/bonus tokens.</p>
+<figure><a href="native-branch-throughput.png" target="_blank" rel="noopener" title="View full-size figure"><img loading="lazy" src="native-branch-throughput.png" alt="End-to-end throughput across batch settings for DFlash, public-weight MTP415, and DMTP on Code, Math, and Agent"></a></figure>
+<p><em>Figure 7. TP4 E2E throughput of DFlash, MTP415, and DMTP on Code, Math, and Agent, in tok/s with independent y-axes. B2/B4/B8 use the first 8 requests; B16/B32 use the first 64, with natural EOS and a 28K cap. DFlash/DMTP retain the same-card sequential B32 reference; their other points use two concurrent TP4 GPU groups. MTP415 uses a separate TP4 sweep.</em></p>
+<p>We add native MTP throughput from public Qwen3.6-35B-A3B weights as a reference: four steps, top-k=1, five verification slots, and four proposed candidates, with overlap disabled. DFlash/DMTP use internal Target weights and seven candidates, with overlap enabled.</p>
+<p><strong>In the B32 reference evaluation, DMTP improves E2E throughput by 17.10%–23.75% across the three plotted workloads.</strong> Code increases from 5526.78 to 6564.08 tok/s (+18.77%) and Math from 6054.42 to 7089.92 tok/s (+17.10%), alongside roughly 18% gains in per-verify acceptance length. Agent increases from 1016.94 to 1258.44 tok/s (+23.75%).</p>
+<p>We compute E2E throughput as total output tokens divided by workload completion time, including queueing, prefill, and decode, with natural EOS.</p>
+<h2 id="en-section-8">8. Future Directions</h2>
+<p><strong>One limitation of DMTP is its reliance on native MTP&#39;s first-token prediction.</strong> When MTP is insufficiently trained for a particular setting, its first-token acceptance can be lower than that of a DFlash model fine-tuned on relevant task data. Delegating the first token to MTP may then be the weaker choice. We want to better understand this gap and explore how training and cooperation between the two models can improve those settings.</p>
+<p>Beyond the current target-only verifier, we plan to explore <strong>rejection sampling and block verify</strong>, evaluating acceptance length, sampling consistency, and end-to-end throughput.</p>
+<p>There are several directions we would like to explore:</p>
+<ul>
+<li><strong>Adaptive multi-step MTP.</strong> Explore adaptively choosing the number of MTP steps before parallel DFlash continuation.</li>
+<li><strong>A unified MTP–DFlash formulation.</strong> Can we train both within one framework and better understand why their first-token acceptance and later-position decay differ?</li>
+<li><strong>Joint training.</strong> MTP does not have to stay frozen. We can train it together with DFlash and study how to improve block prediction while preserving its first-token strength.</li>
+<li><strong>Multi-layer MTP for block prediction.</strong> Can multiple MTP layers learn to predict a block, combining pretrained MTP capabilities with parallel drafting?</li>
+<li><strong>Larger models.</strong> Extend DMTP to larger target models and explore different MTP–DFlash combinations to evaluate its generalization and acceleration potential at scale.</li>
+</ul>
+<p>DMTP is still an initial exploration. We will share results across more models and settings, with the paper and open-source code to follow soon. We welcome reproductions, findings from different models and tasks, and contributions to both training methods and inference implementations. We hope to explore this direction together with the community.</p>
+<h2 id="en-section-9">References</h2>
+<ol>
+<li><a href="https://z-lab.ai/projects/dflash/">DFlash: Block Diffusion for Flash Speculative Decoding</a></li>
+<li><a href="https://arxiv.org/abs/2607.05147">DSpark: Confidence-Scheduled Speculative Decoding with Semi-Autoregressive Generation</a></li>
+<li><a href="https://www.lmsys.org/blog/2026-08-04-specforge-v0-3">SpecForge v0.3.0</a></li>
+</ol>
+<h2 id="en-section-10">Acknowledgements</h2>
+<p>We thank the <strong>Qwen Team, the GLM/Domino Team, the Qwen Application Team, and the SpecForge Team</strong> for their support and discussions. This work was carried out during my <strong>internship with the Qwen Infra team</strong>.</p>
+<p><strong>Qwen Team</strong>: Yuhao Shen, Di Liu, Yucheng Li, Hao Yu, Yang Xu, Xi Lin, Yi Zhang.</p>
+<p><strong>GLM/Domino Team</strong>: Jianuo Huang.</p>
+<p><strong>Qwen Application Team</strong>: Tianyu Liu, Jun Zhang.</p>
+<p><strong>SpecForge Team</strong>: Jiaping Wang.</p>
+<h2 id="en-section-11">Citation</h2>
+<p>If you find this work useful, please consider citing this technical blog:</p>
+<pre><code class="language-bibtex">@misc{shen2026dmtp,
+  author = {Shen, Piggy},
+  title  = {{DMTP}: A Better First Token for Block Drafting via MTP},
+  year   = {2026},
+  note   = {Technical blog}
+}
+</code></pre>
+</article>
+<footer class="article-footer"><strong>DMTP</strong><span data-lang="zh" hidden>第一步用 MTP，后六步交给 DFlash。</span><span data-lang="en">MTP starts. DFlash continues.</span><a data-download="zh" href="DMTP.zh.md" download hidden>Markdown ↓</a><a data-download="en" href="DMTP.en.md" download>Markdown ↓</a></footer>
+</div>
+<aside class="contents" aria-label="Contents"><p data-lang="zh" hidden>本文内容</p><p data-lang="en">ON THIS PAGE</p>
+<nav data-lang="zh" hidden><a href="#zh-section-0">核心观察</a><a href="#zh-section-1">1. 首位接受率与并行 Draft</a><a href="#zh-section-2">2. DMTP：第一步用 MTP，后六步交给 DFlash</a><a href="#zh-section-3">3. MTP 表示的注入方式</a><a href="#zh-section-4">4. DMTP 训练流程</a><a href="#zh-section-5">5. 推理流程：先 MTP，再 DFlash</a><a href="#zh-section-6">6. 推理实现与系统优化</a><a href="#zh-section-7">7. 主方法的六类生成评测</a><a href="#zh-section-8">8. 后续方向</a><a href="#zh-section-9">参考资料</a><a href="#zh-section-10">致谢</a><a href="#zh-section-11">引用</a></nav><nav data-lang="en"><a href="#en-section-0">The Key Observations</a><a href="#en-section-1">1. First-Token Acceptance and Parallel Drafting</a><a href="#en-section-2">2. DMTP: MTP Starts, DFlash Continues</a><a href="#en-section-3">3. MTP Hidden-State Integration and Ablations</a><a href="#en-section-4">4. Training DMTP</a><a href="#en-section-5">5. Inference: MTP First, DFlash Second</a><a href="#en-section-6">6. Inference Implementation and Systems Optimizations</a><a href="#en-section-7">7. Main-Method Evaluation Across Six Workloads</a><a href="#en-section-8">8. Future Directions</a><a href="#en-section-9">References</a><a href="#en-section-10">Acknowledgements</a><a href="#en-section-11">Citation</a></nav>
+<div class="edition-status"><span class="status-dot"></span><span data-lang="zh" hidden>技术博客<br>2026 年 10 月 30 日</span><span data-lang="en">Technical blog<br>October 30, 2026</span></div>
+</aside></main>
+<script src="app.js"></script></body></html>
