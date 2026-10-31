@@ -4,7 +4,7 @@
 
 投机解码已成为大模型推理基础设施的重要组成部分。[DFlash](https://z-lab.ai/projects/dflash/) 展示了并行预测多个候选的潜力，DeepSeek 也在生产服务中采用 [DSpark](https://arxiv.org/abs/2607.05147)，并报告了相对 MTP 的收益。然而，在 GLM、Qwen 等原生 MTP 训练充分的模型及部分对话场景中，DFlash 相比 MTP 并不总有显著优势。我们关注的是如何复用 MTP 的首 token 预测能力。
 
-我们的评测以及与 Domino 作者 Jianuo Huang 的讨论，揭示了两者的互补性：原生 MTP 的首 token 接受率更高，在训练分布之外的场景下尤其明显；DFlash 则能并行生成更长的续写。这为结合预训练首位能力与并行预测提供了直接动机。
+我们的评测以及与 [Domino](https://arxiv.org/abs/2605.29707) 作者 Jianuo Huang 的讨论，揭示了两者的互补性：原生 MTP 的首 token 接受率更高，在训练分布之外的场景下尤其明显；DFlash 则能并行生成更长的续写。这为结合预训练首位能力与并行预测提供了直接动机。
 
 针对 DFlash 类模型在候选块内后续位置接受率逐渐衰减的问题，已有多种改进方案。**我们关注的是另一个问题：能不能先把第一个候选 token 的接受率提上去？** 验证按连续前缀接受：首位被拒绝，后面的候选就无法在本轮提交。DMTP 从预训练 MTP 的首位预测出发，再把预测它时的隐藏状态传给 DFlash，帮助后续并行续写。
 
@@ -340,6 +340,7 @@ DMTP 仍是一次初步探索。我们将继续分享更多模型与场景下的
 1. [DFlash: Block Diffusion for Flash Speculative Decoding](https://z-lab.ai/projects/dflash/)
 2. [DSpark: Confidence-Scheduled Speculative Decoding with Semi-Autoregressive Generation](https://arxiv.org/abs/2607.05147)
 3. [SpecForge v0.3.0](https://www.lmsys.org/blog/2026-08-04-specforge-v0-3)
+4. [Domino: Decoupling Causal Modeling from Autoregressive Drafting in Speculative Decoding](https://arxiv.org/abs/2605.29707) · [官方代码](https://github.com/jianuo-huang/Domino)
 
 ## 致谢
 

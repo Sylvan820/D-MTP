@@ -4,7 +4,7 @@
 
 Speculative decoding is an important component of LLM inference infrastructure. [DFlash](https://z-lab.ai/projects/dflash/) demonstrates the potential of parallel candidate prediction, while DeepSeek has deployed [DSpark](https://arxiv.org/abs/2607.05147) in production and reported gains over MTP. Yet DFlash does not consistently outperform MTP on models with well-trained native MTP modules, such as GLM and Qwen, or on some conversation workloads. We focus on reusing MTP's first-token prediction capability.
 
-Our evaluations and discussions with Domino author Jianuo Huang highlight complementary strengths: native MTP has higher first-token acceptance, particularly on workloads outside the training distribution, while DFlash generates a longer continuation in parallel. This motivates combining pretrained first-token prediction with parallel drafting.
+Our evaluations and discussions with [Domino](https://arxiv.org/abs/2605.29707) author Jianuo Huang highlight complementary strengths: native MTP has higher first-token acceptance, particularly on workloads outside the training distribution, while DFlash generates a longer continuation in parallel. This motivates combining pretrained first-token prediction with parallel drafting.
 
 Several approaches address the decline in acceptance at later positions within a DFlash-style block. **We focus on a different question: can we improve the first draft token itself?** Under prefix verification, rejecting that first candidate prevents the rest of the block from being committed. DMTP starts with a pretrained MTP prediction, then passes its hidden representation to DFlash for the continuation.
 
@@ -342,6 +342,7 @@ DMTP is still an initial exploration. We will share results across more models a
 1. [DFlash: Block Diffusion for Flash Speculative Decoding](https://z-lab.ai/projects/dflash/)
 2. [DSpark: Confidence-Scheduled Speculative Decoding with Semi-Autoregressive Generation](https://arxiv.org/abs/2607.05147)
 3. [SpecForge v0.3.0](https://www.lmsys.org/blog/2026-08-04-specforge-v0-3)
+4. [Domino: Decoupling Causal Modeling from Autoregressive Drafting in Speculative Decoding](https://arxiv.org/abs/2605.29707) · [Official code](https://github.com/jianuo-huang/Domino)
 
 ## Acknowledgements
 
