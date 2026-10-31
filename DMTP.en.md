@@ -2,13 +2,13 @@
 
 **Piggy Shen · October 2026 · Technical Blog**
 
-Speculative decoding is an important component of LLM inference infrastructure. [DFlash](https://z-lab.ai/projects/dflash/) demonstrates the potential of parallel candidate prediction, while DeepSeek has deployed [DSpark](https://arxiv.org/abs/2607.05147) in production and reported gains over MTP-1. Yet DFlash does not consistently outperform MTP on models with well-trained native MTP modules, such as GLM and Qwen, or on some conversation workloads.
+Speculative decoding is an important component of LLM inference infrastructure. [DFlash](https://z-lab.ai/projects/dflash/) demonstrates the potential of parallel candidate prediction, while DeepSeek has deployed [DSpark](https://arxiv.org/abs/2607.05147) in production and reported gains over MTP. Yet DFlash does not consistently outperform MTP on models with well-trained native MTP modules, such as GLM and Qwen, or on some conversation workloads. We focus on reusing MTP's first-token prediction capability.
 
-Our evaluations and discussions with Domino author Jianuo Huang highlight complementary strengths: native MTP has higher first-token acceptance, particularly on OOD workloads, while DFlash generates a longer continuation in parallel. This motivates combining pretrained first-token prediction with parallel drafting.
+Our evaluations and discussions with Domino author Jianuo Huang highlight complementary strengths: native MTP has higher first-token acceptance, particularly on workloads outside the training distribution, while DFlash generates a longer continuation in parallel. This motivates combining pretrained first-token prediction with parallel drafting.
 
 Several approaches address the decline in acceptance at later positions within a DFlash-style block. **We focus on a different question: can we improve the first draft token itself?** Under prefix verification, rejecting that first candidate prevents the rest of the block from being committed. DMTP starts with a pretrained MTP prediction, then passes its hidden representation to DFlash for the continuation.
 
-We introduce **DMTP**: pretrained MTP proposes the first token, and DFlash generates the continuation in parallel. Our main method is **MTP-style token and hidden-state fusion**: independently normalize the T1 embedding and its predicting MTP hidden, concatenate them, and project the pair into the T1 input position.
+We introduce **DMTP**: pretrained MTP proposes the first candidate token in each drafting round (**T1**), and DFlash predicts the remaining six candidates (**T2–T7**) in parallel. Our main method is **MTP-style token and hidden-state fusion**: independently normalize the first candidate's embedding and the MTP hidden state that predicted it, concatenate them, and project the pair into that candidate's input position.
 
 > **The key idea:** let MTP start the block and DFlash continue it in parallel. The two models share both a concrete candidate and a predictive representation, while retaining their original backbones.
 
@@ -20,7 +20,7 @@ We introduce **DMTP**: pretrained MTP proposes the first token, and DFlash gener
 
 ## 1. First-Token Acceptance and Parallel Drafting
 
-Figure 1 compares **DFlash and native MTP** using the same target model. DFlash is trained on a mixture of tasks with 32K sequences; MTP uses the pretrained weights bundled with the same target.
+Figure 1 compares **DFlash and native MTP** using the same target model. DFlash is trained on a mixture of tasks with 32K sequences; MTP uses the pretrained weights bundled with the same target. First-token acceptance is the fraction of rounds in which the target accepts the first proposed candidate.
 
 Both arms use the same Qwen3.6-35B-A3B target and input set across Code, Math, MT-Bench, Agent, SWE and Long-horizon. **DMTP itself uses MTP for T1 and DFlash for six parallel continuation candidates.**
 
@@ -63,7 +63,7 @@ We use MTP only for T1 to control serial drafting cost. Additional MTP candidate
 
 We use **MTP-style token and hidden-state fusion** and compare alternative representation interfaces through ablations.
 
-Let \(A = x_a\) be the pending target-produced token. Target context ends at \(x_{a-1}\). Native MTP consumes \(A\) and the preceding target hidden, producing the representation that predicts \(T_1 = x_{a+1}\). No target hidden for \(A\) or \(T_1\) is required.
+We refer to the target model as Target and the proposing model as Draft. Let \(A = x_a\) be the token already emitted by Target but not yet processed by it (the pending token). Available target-context features end at \(x_{a-1}\). Native MTP reads \(A\) and the preceding target hidden state to predict the first candidate, \(T_1 = x_{a+1}\). No target hidden state for \(A\) or \(T_1\) is required.
 
 Fusion reads **the MTP hidden that predicted T1**, not one computed after consuming T1:
 
@@ -71,7 +71,7 @@ $$
 \widetilde{\mathbf e}_{T_1}=W_f\left[\operatorname{RMS}_e(\mathbf e_{T_1});\operatorname{RMS}_m(\mathbf h_{\mathrm{MTP}})\right].
 $$
 
-Each 2048-dimensional input has its own learned RMSNorm, followed by a 4096→2048 linear projection. The input is `[T1,MASK×6]`, with only the T1 embedding replaced. All six MASK embeddings, the original prediction head, and the target-context FC→KV path stay unchanged; no MTP KV slot is added.
+Each 2048-dimensional input has its own learned RMSNorm, followed by a 4096→2048 linear projection. The input is `[T1,MASK×6]`, where MASK marks a position to predict. Only the first candidate's embedding is replaced. The six mask embeddings, original prediction head, and target-context projection and key/value cache (KV) path stay unchanged; MTP's KV is not concatenated into DFlash context.
 
 ### The MTP-Style Fusion Interface
 
@@ -147,7 +147,7 @@ We also tried repurposing MTP layers for DFlash-style parallel prediction, but s
 
 ## 4. Training DMTP
 
-We use Qwen3.6-35B-A3B with 32K training contexts and approximately 250K records, predominantly from Agent and Long-horizon scenarios. We use MT-Bench as an out-of-distribution (OOD) evaluation to examine generalization beyond the training distribution.
+We use Qwen3.6-35B-A3B with 32K training contexts and approximately 250K records, predominantly from Agent and Long-horizon scenarios. MT-Bench evaluates generalization beyond the training distribution.
 
 We train DFlash and DMTP with the same data, training hyperparameters, and training budget. DMTP adds native MTP's first-token prediction and its predicting hidden state, together with a trainable T1 fusion module.
 
@@ -155,9 +155,9 @@ Training follows three steps:
 
 1. **Extract frozen features.** Target processes the training sequence. At each block boundary, MTP consumes A and the preceding target hidden to obtain the representation for predicting T1. DFlash context uses only target features before A.
 2. **Build the draft input.** Use `[T1,MASK×6]` with the dataset's T1. Independently normalize E(T1) and its predicting MTP hidden, concatenate, and project to replace the T1 embedding. All six MASK embeddings remain unchanged.
-3. **Optimize the continuation.** DFlash learns T2–T7 with the original position-decayed CE objective. Target and MTP stay frozen; only DFlash and the T1 fusion module are updated. The known T1 input slot receives no draft prediction loss.
+3. **Optimize the continuation.** DFlash learns the remaining six candidates with the original position-decayed cross-entropy loss. The target model and MTP stay frozen; only DFlash and the first-candidate fusion module are updated. The known first-candidate input slot receives no draft prediction loss.
 
-We use <mark>GT T1</mark> during training and MTP-generated T1 during inference, so that train–inference difference remains. We keep the hidden-state timing consistent: both use the MTP representation that predicts T1, not the hidden obtained after consuming it.
+We use <mark>the first candidate token from the training data</mark> during training and the MTP-generated candidate during inference. Hidden-state timing stays consistent: both use the MTP representation that predicts the first candidate, not the hidden state obtained after consuming it.
 
 ## 5. Inference: MTP First, DFlash Second
 
@@ -165,13 +165,13 @@ Each generation round follows the order in Figure 2:
 
 1. **MTP proposes T1.** Read the available target hidden and consume pending token A. Keep both the selected T1 and the MTP hidden that predicted it.
 2. **DFlash predicts T2–T7.** Form `[T1,MASK×6]`, fuse E(T1) with its predicting MTP hidden, replace only the T1 embedding, and run one parallel DFlash forward.
-3. **Target verifies the block.** Verify T1–T7 together, commit the accepted prefix and correction/bonus token, then advance to the next round.
+3. **The target model verifies the block.** Verify all seven candidates together, commit the accepted prefix and correction or bonus token, then advance to the next round. A bonus token is the extra token generated by the target when all draft candidates are accepted.
 
 **We use target-only verification throughout these experiments.** We check candidates token by token against Target samples and accept the consecutive matching prefix. We have not yet integrated rejection sampling or block verify; we plan to compare their effects on acceptance length and throughput.
 
 The runtime keeps MTP and DFlash state separate, commits only accepted history, and rolls back rejected candidates.
 
-The additional computation consists of an MTP forward, its first-token LM head, two normalizations, and a T1 fusion projection. The target-context pathway remains unchanged; DFlash uses seven input slots: T1 and six MASKs.
+The additional computation consists of an MTP forward, its vocabulary output layer (LM head), two normalizations, and a first-candidate fusion projection. The target-context pathway remains unchanged; DFlash uses seven input slots: the first candidate and six masks.
 
 We next focus on state updates, execution scheduling, and CUDA Graph coverage to reduce the handoff cost between MTP and DFlash.
 
@@ -191,38 +191,38 @@ After Target verification, we advance MTP state using the accepted prefix, corre
 
 ### 6.2 Attention: One Backend, Different Visibility Rules
 
-We keep DFlash's existing FA3 and CUDA Graph support and use FA3 for the added MTP path as well. The two paths need different visibility rules: MTP reads full history causally, while DFlash reads the last 4096 positions relative to the anchor and its seven-slot block with the visibility used in training.
+We keep DFlash's existing FlashAttention-3 and CUDA Graph support and use FlashAttention-3 for the added MTP path as well. The two paths need different visibility rules: MTP reads full history causally, while DFlash reads the last 4096 positions relative to the anchor and its seven-slot block with the visibility used in training.
 
-Temporary DFlash page tables express this visibility without moving persistent KV, changing RoPE positions, or replacing the anchor-relative window with a query-relative one. The MTP path retains the native FA3 operator and prepares fixed-eight-slot metadata on device, avoiding CPU length transfers on normal steps.
+Temporary DFlash page tables express this visibility without moving persistent key/value caches, changing rotary positional encoding (RoPE) positions, or replacing the anchor-relative window with a query-relative one. The MTP path retains the native FlashAttention-3 operator and prepares fixed-eight-slot metadata on device, avoiding CPU length transfers on normal steps.
 
-### 6.3 KV Lifetime: Persistent History, Pending, and Scratch
+### 6.3 Key/Value Cache Lifetime: History, Pending Tokens, and Temporary Storage
 
 ![Private MTP KV lifetime: persistent history, pending anchor, valid eight-slot rows, scratch, and verification-dependent commit](inference-kv-lifecycle.png)
 
 *MTP state advancement and commit, illustrated with T1 and T2 accepted and bonus B produced.*
 
-We maintain a separate KV cache for MTP, with an additional pending slot, because the two models advance at different times: MTP may have processed the current anchor while Target has not. After verification, we update their boundaries separately and commit only the states that belong in history.
+We maintain a separate key/value cache for MTP, with an additional pending-token slot, because the two models advance at different times: MTP may have processed the current anchor while the target has not. After verification, we update their boundaries separately and commit only the states that belong in history.
 
-We reserve eight MTP advancement slots per request so different acceptance lengths can reuse the same graphs. Valid rows enter history or the next pending slot; extra rows go to private scratch. The valid-row count determines what we commit and which hidden state predicts the next T1. Scratch outputs do not enter subsequent predictions.
+We reserve eight MTP advancement slots per request so different acceptance lengths can reuse the same graphs. Valid rows enter history or the next pending-token slot; extra rows go to private temporary storage (scratch in the figure). The valid-row count determines what we commit and which hidden state predicts the next first candidate. Temporary outputs do not enter subsequent predictions.
 
 ### 6.4 Graph Execution: Preparation and Submission
 
-We pre-capture CUDA Graphs for exact request counts so the fusion GEMM computes only the active rows. During decoding, we update fixed buffers through device staging and replay the graph.
+We pre-capture CUDA Graphs for exact request counts so the fusion matrix multiplication computes only the active rows. During decoding, we prepare data on the device, update fixed buffers, and replay the graph.
 
-We then combine the T1 head, candidate write, Target embedding, and fusion into one graph submission to reduce host scheduling. We merge submissions without changing operator dependencies, precision, argmax behavior, or TP communication.
+We then combine first-candidate vocabulary projection, candidate writing, target-model embedding lookup, and fusion into one graph submission to reduce host scheduling. We merge submissions without changing operator dependencies, precision, highest-probability token selection, or tensor-parallel communication.
 
 | Component | Adaptation or optimization | Cost reduced |
 | --- | --- | --- |
 | MTP advancement | Device-side fixed eight slots, private KV, graph replay | Normal-step CPU length transfers, pack/expand, repeated scheduling |
-| DFlash attention | Temporary FA3 pages for anchor window and block visibility | Rebuilding or moving persistent KV for the window |
-| T1 preparation | Combined head→candidate write→embedding→fusion graph | Multiple host graph submissions and handoffs |
-| Accepted-state commit | Valid rows select history/pending/scratch writes and predictor hidden | Dynamic-length layout conversion |
+| DFlash attention | Temporary FlashAttention-3 pages for anchor window and block visibility | Rebuilding or moving persistent key/value caches for the window |
+| First-candidate preparation | Combined vocabulary projection→candidate write→embedding→fusion graph | Multiple host graph submissions and handoffs |
+| Accepted-state commit | Valid rows select history, pending-token, and temporary writes and the predictor hidden state | Dynamic-length layout conversion |
 
 ### 6.5 Cost Structure After Optimization
 
-After device-side preparation, fixed layouts, and combined graph execution, the main added computation is **one MTP decoder block and the LM head that selects T1**. The block includes full-history causal attention, projections, normalization, MLP, and TP communication, so its cost varies with context length.
+After device-side preparation, fixed layouts, and combined graph execution, the main added computation is **one MTP decoder block and the vocabulary output layer that selects the first candidate**. The block includes full-history causal attention, projections, normalization, a feed-forward network, and tensor-parallel communication, so its cost varies with context length.
 
-**The LM head is a priority for further optimization.** Even for a single T1, a standard head reads the large vocabulary matrix and computes full-vocabulary logits.
+**The vocabulary output layer is a priority for further optimization.** Even for a single candidate, it reads the large vocabulary matrix and computes scores for every token in the vocabulary.
 
 We plan to explore [EAGLE-4's Efficient LM Head](https://github.com/eagle-hq/EAGLE-4/blob/main/docs/architecture.md), using a low-rank head to shortlist candidates before exact rescoring, as well as drafting-side head quantization to reduce weight traffic and projection cost. Target verification stays unchanged; we will evaluate both acceptance length and throughput.
 
@@ -241,7 +241,7 @@ DFlash replay time is essentially unchanged; the added stages are mainly MTP and
 
 ## 7. Main-Method Evaluation Across Six Workloads
 
-Our evaluation focuses on **long-context agent workloads**, with additional coverage of Code, Math, and MT-Bench, comparing DMTP against DFlash and native MTP. The first three workloads (Code, Math, MT-Bench) primarily have **short inputs and long outputs**; the latter three (Agent, SWE, Long-horizon) primarily have **long inputs and short outputs**. MT-Bench serves as the OOD evaluation.
+Our evaluation focuses on **long-context agent workloads**, with additional coverage of Code, Math, and MT-Bench, comparing DMTP against DFlash and native MTP. The first three workloads (Code, Math, MT-Bench) primarily have **short inputs and long outputs**; the latter three (Agent, SWE, Long-horizon) primarily have **long inputs and short outputs**. MT-Bench evaluates performance outside the training distribution.
 
 Inputs are capped at **128K tokens** and outputs at **28K tokens**. All methods use the same inputs at a generation temperature of 1.
 
@@ -309,17 +309,17 @@ Dynamic batching allows the active batch to vary as requests complete; Bn specif
 | SWE | 3.407 | 3.881 | 2.794 | 3.173 |
 | Long-horizon | 4.356 | 5.022 | 3.641 | 4.656 |
 
-**Per-request** averages acceptance length across requests. **Per-verify** measures mean token advancement per verification round: `1 + Σ(k × histogram[k]) / Σhistogram`. Both include correction/bonus tokens.
+**Per-request** first computes the mean acceptance length for each request, then averages across requests. **Per-verify** averages token advancement over all verification rounds: `1 + Σ(k × histogram[k]) / Σhistogram`. Here `histogram[k]` counts rounds accepting k draft candidates; the additional 1 is the target correction or bonus token.
 
 ![End-to-end throughput across batch settings for DFlash, public-weight MTP415, and DMTP on Code, Math, and Agent](native-branch-throughput.png)
 
-*Figure 7. TP4 E2E throughput of DFlash, MTP415, and DMTP on Code, Math, and Agent, in tok/s with independent y-axes. B2/B4/B8 use the first 8 requests; B16/B32 use the first 64, with natural EOS and a 28K cap. DFlash/DMTP retain the same-card sequential B32 reference; their other points use two concurrent TP4 GPU groups. MTP415 uses a separate TP4 sweep.*
+*Figure 7. End-to-end throughput of DFlash, native MTP, and DMTP using four-way tensor parallelism (TP4) on Code, Math, and Agent, in tok/s with independent y-axes. The figure label MTP415 denotes four MTP steps, four candidates, and five verification slots. Bn means a batch limit of n. B2/B4/B8 use the first 8 requests; B16/B32 use the first 64, with natural EOS and a 28K cap. DFlash/DMTP retain the same-card sequential B32 reference; their other points use two concurrent TP4 GPU groups. Native MTP uses a separate sweep.*
 
 We add native MTP throughput from public Qwen3.6-35B-A3B weights as a reference: four steps, top-k=1, five verification slots, and four proposed candidates, with overlap disabled. DFlash/DMTP use internal Target weights and seven candidates, with overlap enabled.
 
 **In the B32 reference evaluation, DMTP improves E2E throughput by 17.10%–23.75% across the three plotted workloads.** Code increases from 5526.78 to 6564.08 tok/s (+18.77%) and Math from 6054.42 to 7089.92 tok/s (+17.10%), alongside roughly 18% gains in per-verify acceptance length. Agent increases from 1016.94 to 1258.44 tok/s (+23.75%).
 
-We compute E2E throughput as total output tokens divided by workload completion time, including queueing, prefill, and decode, with natural EOS.
+We compute end-to-end throughput as total output tokens divided by workload completion time, including queueing, prompt prefilling, and decoding. Generation stops normally at the end-of-sequence token (EOS).
 
 ## 8. Future Directions
 
