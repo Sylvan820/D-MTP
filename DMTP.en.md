@@ -337,11 +337,7 @@ The probability loss is \(1-q(y)\), where \(q(y)\) is the draft probability of t
 
 Both baselines propose seven tokens from **[A, MASK × 7]**. DMTP uses **[T1, MASK × 6]**, with MTP-style fusion at T1, preserving the same seven-proposal budget.
 
-### Acceptance Length Without Thinking
-
-We evaluate DFlash and **DMTP(DFLASH)** at **24,000 training steps**. The latter uses a DFlash drafter; both share the public Qwen3.6-27B target model and propose seven candidates per round.
-
-We train on **non-thinking responses** from OpenPerfectBlend and disable thinking during evaluation to keep the response format consistent.
+### Acceptance-Length Evaluation
 
 We use four-way tensor parallelism, a batch limit of 32, and the first 80 entries in each dataset's original order. Inputs use the target tokenizer's chat template with `enable_thinking=False`, temperature 0, `top_p=1`, and `top_k=-1`.
 
