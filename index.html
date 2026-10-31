@@ -558,6 +558,7 @@ Target：验证七个候选，提交接受前缀与修正/bonus
 <figure><a href="native-branch-throughput.png" target="_blank" rel="noopener" title="查看原图"><img loading="lazy" src="native-branch-throughput.png" alt="DFlash、公开权重 MTP415 与 DMTP 在 Code、Math、Agent 上不同 batch 设置的端到端吞吐"></a></figure>
 <p><em>图 7：DFlash、原生 MTP 与 DMTP 在 Code、Math、Agent 上的四卡张量并行（TP4）端到端吞吐，单位 tok/s，三个子图采用独立纵轴。图中 MTP415 指四步 MTP、四个候选、五个验证槽位。Bn 表示 batch 上限为 n；B2/B4/B8 各取前 8 条，B16/B32 各取前 64 条，保留自然 EOS 与 28K 上限。DFlash/DMTP 的 B32 沿用同卡顺序参考评测，其他点为固定两组 TP4 并行扫描；原生 MTP 为独立扫描。</em></p>
 <p>我们加入公开 Qwen3.6-35B-A3B 的原生 MTP 吞吐作为参考：四步、top-k=1、五个验证槽位，共提出四个候选，关闭 overlap。DFlash/DMTP 使用内部 Target 权重、七个候选，开启 overlap。</p>
+<p><strong>为什么选择四步 MTP？</strong> 在这组配置下，三步 MTP（MTP314）的起草开销与五层 DFlash 接近。DMTP 在 DFlash 之外增加一次 MTP 预测，因此我们选择四步 MTP（MTP415）作为起草开销近似匹配的对照。四步也是 Qwen 推理中常用的 MTP 基线设置。</p>
 <p><strong>在 B32 参考评测中，DMTP 在图示三类任务上获得 17.10%～23.75% 的端到端吞吐提升。</strong> Code 从 5526.78 提升至 6564.08 tok/s（+18.77%），Math 从 6054.42 提升至 7089.92 tok/s（+17.10%），与两类任务约 18% 的 per-verify 接受长度提升相呼应。Agent 从 1016.94 提升至 1258.44 tok/s（+23.75%）。</p>
 <p>我们用总输出 token 数除以整组请求的完成时间计算端到端吞吐，覆盖排队、输入预填充和解码；输出遇到结束符（EOS）时正常停止。</p>
 <h2 id="zh-section-8">8. 开源复现与评测</h2>
@@ -580,35 +581,42 @@ Target：验证七个候选，提交接受前缀与修正/bonus
 <th>数据集</th>
 <th align="right">DFlash</th>
 <th align="right">DMTP(DFLASH)</th>
+<th align="right">原生 MTP415</th>
 </tr>
 </thead>
 <tbody><tr>
 <td>GSM8K</td>
 <td align="right">4.318</td>
 <td align="right"><strong>5.074</strong></td>
+<td align="right">4.373</td>
 </tr>
 <tr>
 <td>HumanEval</td>
 <td align="right">6.424</td>
 <td align="right"><strong>6.795</strong></td>
+<td align="right">4.698</td>
 </tr>
 <tr>
 <td>Alpaca</td>
 <td align="right">2.763</td>
-<td align="right"><strong>3.358</strong></td>
+<td align="right">3.358</td>
+<td align="right"><strong>3.529</strong></td>
 </tr>
 <tr>
 <td>MATH500</td>
 <td align="right">4.258</td>
 <td align="right"><strong>4.968</strong></td>
+<td align="right">4.377</td>
 </tr>
 <tr>
 <td>MT-Bench</td>
 <td align="right">3.209</td>
 <td align="right"><strong>3.760</strong></td>
+<td align="right">3.599</td>
 </tr>
 </tbody></table></div>
 <p>我们报告<strong>请求级平均接受长度</strong>，包含目标模型的修正或 bonus token，各次生成等权平均；MT-Bench 的两个轮次分别计入。</p>
+<p>原生 MTP415 使用同一公开 Qwen3.6-27B 及其内置 MTP 权重，沿用上述输入与采样设置。415 表示四步起草、top-k 为 1、五个验证槽位，共提出四个候选，关闭 overlap 调度。其接受长度上限为 5；DFlash 与 DMTP 提出七个候选，上限为 8。因此，原生 MTP 一列作为参考，不是等候选预算消融。</p>
 <h2 id="zh-section-9">9. 后续方向</h2>
 <p><strong>DMTP 的一个局限，是它依赖原生 MTP 的首位预测能力。</strong> 如果 MTP 在某些场景下训练不够充分，它的首 token 接受率可能低于经过任务数据微调的 DFlash。这时，直接把首位交给 MTP 未必是更好的选择。我们还需要进一步探索这种差异，以及如何通过训练和两者的协作改善这些场景。</p>
 <p>我们还想继续探索几个方向：</p>
@@ -1188,6 +1196,7 @@ Target:  verify seven candidates and commit the accepted prefix plus correction/
 <figure><a href="native-branch-throughput.png" target="_blank" rel="noopener" title="View full-size figure"><img loading="lazy" src="native-branch-throughput.png" alt="End-to-end throughput across batch settings for DFlash, public-weight MTP415, and DMTP on Code, Math, and Agent"></a></figure>
 <p><em>Figure 7. End-to-end throughput of DFlash, native MTP, and DMTP using four-way tensor parallelism (TP4) on Code, Math, and Agent, in tok/s with independent y-axes. The figure label MTP415 denotes four MTP steps, four candidates, and five verification slots. Bn means a batch limit of n. B2/B4/B8 use the first 8 requests; B16/B32 use the first 64, with natural EOS and a 28K cap. DFlash/DMTP retain the same-card sequential B32 reference; their other points use two concurrent TP4 GPU groups. Native MTP uses a separate sweep.</em></p>
 <p>We add native MTP throughput from public Qwen3.6-35B-A3B weights as a reference: four steps, top-k=1, five verification slots, and four proposed candidates, with overlap disabled. DFlash/DMTP use internal Target weights and seven candidates, with overlap enabled.</p>
+<p><strong>Why four MTP steps?</strong> In this configuration, three-step MTP (MTP314) has a drafting cost close to five-layer DFlash. DMTP adds one MTP prediction to DFlash, so we use four-step MTP (MTP415) as an approximately cost-matched drafting baseline. Four steps is also a common MTP baseline for Qwen inference.</p>
 <p><strong>In the B32 reference evaluation, DMTP improves E2E throughput by 17.10%–23.75% across the three plotted workloads.</strong> Code increases from 5526.78 to 6564.08 tok/s (+18.77%) and Math from 6054.42 to 7089.92 tok/s (+17.10%), alongside roughly 18% gains in per-verify acceptance length. Agent increases from 1016.94 to 1258.44 tok/s (+23.75%).</p>
 <p>We compute end-to-end throughput as total output tokens divided by workload completion time, including queueing, prompt prefilling, and decoding. Generation stops normally at the end-of-sequence token (EOS).</p>
 <h2 id="en-section-8">8. Open-Source Reproduction and Evaluation</h2>
@@ -1211,35 +1220,43 @@ Target:  verify seven candidates and commit the accepted prefix plus correction/
 <th>Dataset</th>
 <th align="right">DFlash</th>
 <th align="right">DMTP(DFLASH)</th>
+<th align="right">Native MTP415</th>
 </tr>
 </thead>
 <tbody><tr>
 <td>GSM8K</td>
 <td align="right">4.318</td>
 <td align="right"><strong>5.074</strong></td>
+<td align="right">4.373</td>
 </tr>
 <tr>
 <td>HumanEval</td>
 <td align="right">6.424</td>
 <td align="right"><strong>6.795</strong></td>
+<td align="right">4.698</td>
 </tr>
 <tr>
 <td>Alpaca</td>
 <td align="right">2.763</td>
-<td align="right"><strong>3.358</strong></td>
+<td align="right">3.358</td>
+<td align="right"><strong>3.529</strong></td>
 </tr>
 <tr>
 <td>MATH500</td>
 <td align="right">4.258</td>
 <td align="right"><strong>4.968</strong></td>
+<td align="right">4.377</td>
 </tr>
 <tr>
 <td>MT-Bench</td>
 <td align="right">3.209</td>
 <td align="right"><strong>3.760</strong></td>
+<td align="right">3.599</td>
 </tr>
 </tbody></table></div>
 <p>We report <strong>per-request mean acceptance length</strong>, including the target correction or bonus token, with equal weight per generation. Each MT-Bench turn counts separately.</p>
+<p>Native MTP415 uses the same public Qwen3.6-27B target and its bundled MTP weights, with the inputs and sampling settings above. It uses four draft steps, top-k of 1, and five verification slots, proposing four candidates with overlap scheduling disabled.</p>
+<p>Its maximum acceptance length is 5, versus 8 for the seven-candidate DFlash and DMTP paths. The native MTP column is therefore a reference, not an equal-candidate-budget ablation.</p>
 <h2 id="en-section-9">9. Future Directions</h2>
 <p><strong>One limitation of DMTP is its reliance on native MTP&#39;s first-token prediction.</strong> When MTP is insufficiently trained for a particular setting, its first-token acceptance can be lower than that of a DFlash model fine-tuned on relevant task data. Delegating the first token to MTP may then be the weaker choice. We want to better understand this gap and explore how training and cooperation between the two models can improve those settings.</p>
 <p>Beyond the current target-only verifier, we plan to explore <strong>rejection sampling and block verify</strong>, evaluating acceptance length, sampling consistency, and end-to-end throughput.</p>

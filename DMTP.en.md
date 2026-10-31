@@ -317,6 +317,8 @@ Dynamic batching allows the active batch to vary as requests complete; Bn specif
 
 We add native MTP throughput from public Qwen3.6-35B-A3B weights as a reference: four steps, top-k=1, five verification slots, and four proposed candidates, with overlap disabled. DFlash/DMTP use internal Target weights and seven candidates, with overlap enabled.
 
+**Why four MTP steps?** In this configuration, three-step MTP (MTP314) has a drafting cost close to five-layer DFlash. DMTP adds one MTP prediction to DFlash, so we use four-step MTP (MTP415) as an approximately cost-matched drafting baseline. Four steps is also a common MTP baseline for Qwen inference.
+
 **In the B32 reference evaluation, DMTP improves E2E throughput by 17.10%–23.75% across the three plotted workloads.** Code increases from 5526.78 to 6564.08 tok/s (+18.77%) and Math from 6054.42 to 7089.92 tok/s (+17.10%), alongside roughly 18% gains in per-verify acceptance length. Agent increases from 1016.94 to 1258.44 tok/s (+23.75%).
 
 We compute end-to-end throughput as total output tokens divided by workload completion time, including queueing, prompt prefilling, and decoding. Generation stops normally at the end-of-sequence token (EOS).
@@ -345,15 +347,19 @@ Generation stops at EOS or 1,024 output tokens per turn. GSM8K, HumanEval, Alpac
 
 Both use FlashAttention-3, CUDA Graph, greedy drafting, and target-only prefix verification.
 
-| Dataset | DFlash | DMTP(DFLASH) |
-| --- | ---: | ---: |
-| GSM8K | 4.318 | **5.074** |
-| HumanEval | 6.424 | **6.795** |
-| Alpaca | 2.763 | **3.358** |
-| MATH500 | 4.258 | **4.968** |
-| MT-Bench | 3.209 | **3.760** |
+| Dataset | DFlash | DMTP(DFLASH) | Native MTP415 |
+| --- | ---: | ---: | ---: |
+| GSM8K | 4.318 | **5.074** | 4.373 |
+| HumanEval | 6.424 | **6.795** | 4.698 |
+| Alpaca | 2.763 | 3.358 | **3.529** |
+| MATH500 | 4.258 | **4.968** | 4.377 |
+| MT-Bench | 3.209 | **3.760** | 3.599 |
 
 We report **per-request mean acceptance length**, including the target correction or bonus token, with equal weight per generation. Each MT-Bench turn counts separately.
+
+Native MTP415 uses the same public Qwen3.6-27B target and its bundled MTP weights, with the inputs and sampling settings above. It uses four draft steps, top-k of 1, and five verification slots, proposing four candidates with overlap scheduling disabled.
+
+Its maximum acceptance length is 5, versus 8 for the seven-candidate DFlash and DMTP paths. The native MTP column is therefore a reference, not an equal-candidate-budget ablation.
 
 ## 9. Future Directions
 
