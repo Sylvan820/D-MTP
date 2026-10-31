@@ -563,7 +563,7 @@ Target：验证七个候选，提交接受前缀与修正/bonus
 <p><strong>在 B32 参考评测中，DMTP 在图示三类任务上获得 17.10%～23.75% 的端到端吞吐提升。</strong> Code 从 5526.78 提升至 6564.08 tok/s（+18.77%），Math 从 6054.42 提升至 7089.92 tok/s（+17.10%），与两类任务约 18% 的 per-verify 接受长度提升相呼应。Agent 从 1016.94 提升至 1258.44 tok/s（+23.75%）。</p>
 <p>我们用总输出 token 数除以整组请求的完成时间计算端到端吞吐，覆盖排队、输入预填充和解码；输出遇到结束符（EOS）时正常停止。</p>
 <h2 id="zh-section-8">8. 开源复现与评测</h2>
-<p>为便于复现并对齐开源实验设置，我们基于<strong>开源 Qwen3.6-27B 与 OpenPerfectBlend</strong>，补充短文本训练和公开数据集评测，并纳入 DFlash2 等起草方法，考察 DMTP 与不同 DFlash 优化的正交性。</p>
+<p>为便于复现并对齐开源实验设置，我们基于<strong>开源 Qwen3.6-27B 与 <a href="https://huggingface.co/datasets/mlabonne/open-perfectblend">OpenPerfectBlend</a></strong>，补充短文本训练和公开数据集评测，并纳入 <a href="https://inco.ai/blog/dflash2/">DFlash2</a> 等起草方法，考察 DMTP 与不同 DFlash 优化的正交性。</p>
 <p>各组使用相同的数据与训练预算，冻结目标模型和原生 MTP。起草模型统一为五层，动态序列长度最长 2K，全局批量 128，在八张 GPU 上以 BF16 训练三个 epoch，约 31K 步。</p>
 <p>DFlash 沿用位置衰减交叉熵，DFlash2 结合块内信息交互、路径选择与自适应损失。在两组基线之上，我们分别加入首个候选位置的 MTP 表示融合，训练对应的 DMTP 版本，保持每轮七个候选的预算不变。</p>
 <h3>接受长度评测</h3>
@@ -603,6 +603,10 @@ Target：验证七个候选，提交接受前缀与修正/bonus
 <li><a href="https://arxiv.org/abs/2607.05147">DSpark: Confidence-Scheduled Speculative Decoding with Semi-Autoregressive Generation</a></li>
 <li><a href="https://www.lmsys.org/blog/2026-08-04-specforge-v0-3">SpecForge v0.3.0</a></li>
 <li><a href="https://arxiv.org/abs/2605.29707">Domino: Decoupling Causal Modeling from Autoregressive Drafting in Speculative Decoding</a> · <a href="https://github.com/jianuo-huang/Domino">官方代码</a></li>
+<li><a href="https://github.com/eagle-hq/EAGLE-4">EAGLE-4：官方实现</a> · <a href="https://github.com/eagle-hq/EAGLE-4/blob/main/docs/architecture.md">架构与 Efficient LM Head</a></li>
+<li><a href="https://inco.ai/blog/dflash2/">DFlash 2: Keep Drafting Parallel</a> · <a href="https://github.com/z-lab/dflash">官方代码</a></li>
+<li><a href="https://huggingface.co/datasets/mlabonne/open-perfectblend">OpenPerfectBlend：公开训练数据集</a></li>
+<li><a href="https://github.com/sgl-project/sglang">SGLang：推理框架</a></li>
 </ol>
 <h2 id="zh-section-11">致谢</h2>
 <p>感谢 <strong>Qwen Team、Domino Team、Qwen Application Team 和 SpecForge Team</strong> 的支持与交流。这项工作是在我于 <strong>Qwen Infra 团队实习期间</strong>完成的。</p>
@@ -1169,7 +1173,7 @@ Target:  verify seven candidates and commit the accepted prefix plus correction/
 <p><strong>In the B32 reference evaluation, DMTP improves E2E throughput by 17.10%–23.75% across the three plotted workloads.</strong> Code increases from 5526.78 to 6564.08 tok/s (+18.77%) and Math from 6054.42 to 7089.92 tok/s (+17.10%), alongside roughly 18% gains in per-verify acceptance length. Agent increases from 1016.94 to 1258.44 tok/s (+23.75%).</p>
 <p>We compute end-to-end throughput as total output tokens divided by workload completion time, including queueing, prompt prefilling, and decoding. Generation stops normally at the end-of-sequence token (EOS).</p>
 <h2 id="en-section-8">8. Open-Source Reproduction and Evaluation</h2>
-<p>To support reproduction and align with open-source settings, we add short-context training and public benchmark evaluation using <strong>public Qwen3.6-27B weights and OpenPerfectBlend</strong>. We also include drafting methods such as DFlash2 to examine how DMTP complements different DFlash optimizations.</p>
+<p>To support reproduction and align with open-source settings, we add short-context training and public benchmark evaluation using <strong>public Qwen3.6-27B weights and <a href="https://huggingface.co/datasets/mlabonne/open-perfectblend">OpenPerfectBlend</a></strong>. We also include drafting methods such as <a href="https://inco.ai/blog/dflash2/">DFlash2</a> to examine how DMTP complements different DFlash optimizations.</p>
 <p>All variants share the same data and training budget, with the target model and native MTP frozen. We use five-layer drafts, dynamic sequences up to 2K, and a global batch size of 128, training on eight GPUs in BF16 for three epochs, or approximately 31K steps.</p>
 <p>DFlash retains position-decayed cross-entropy, while DFlash2 combines block-local mixing, path selection, and adaptive loss. We add MTP representation fusion at the first candidate position to each baseline and train the corresponding DMTP model, preserving seven proposals per round.</p>
 <h3>Acceptance-Length Evaluation</h3>
@@ -1209,6 +1213,10 @@ Target:  verify seven candidates and commit the accepted prefix plus correction/
 <li><a href="https://arxiv.org/abs/2607.05147">DSpark: Confidence-Scheduled Speculative Decoding with Semi-Autoregressive Generation</a></li>
 <li><a href="https://www.lmsys.org/blog/2026-08-04-specforge-v0-3">SpecForge v0.3.0</a></li>
 <li><a href="https://arxiv.org/abs/2605.29707">Domino: Decoupling Causal Modeling from Autoregressive Drafting in Speculative Decoding</a> · <a href="https://github.com/jianuo-huang/Domino">Official code</a></li>
+<li><a href="https://github.com/eagle-hq/EAGLE-4">EAGLE-4: Official implementation</a> · <a href="https://github.com/eagle-hq/EAGLE-4/blob/main/docs/architecture.md">Architecture and Efficient LM Head</a></li>
+<li><a href="https://inco.ai/blog/dflash2/">DFlash 2: Keep Drafting Parallel</a> · <a href="https://github.com/z-lab/dflash">Official code</a></li>
+<li><a href="https://huggingface.co/datasets/mlabonne/open-perfectblend">OpenPerfectBlend: Public training dataset</a></li>
+<li><a href="https://github.com/sgl-project/sglang">SGLang: Inference framework</a></li>
 </ol>
 <h2 id="en-section-11">Acknowledgements</h2>
 <p>We thank the <strong>Qwen Team, the Domino Team, the Qwen Application Team, and the SpecForge Team</strong> for their support and discussions. This work was carried out during my <strong>internship with the Qwen Infra team</strong>.</p>

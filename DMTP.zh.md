@@ -325,7 +325,7 @@ DMTP 在六类任务的 T1～T7 位置均获得了更高的累计接受率，表
 
 ## 8. 开源复现与评测
 
-为便于复现并对齐开源实验设置，我们基于**开源 Qwen3.6-27B 与 OpenPerfectBlend**，补充短文本训练和公开数据集评测，并纳入 DFlash2 等起草方法，考察 DMTP 与不同 DFlash 优化的正交性。
+为便于复现并对齐开源实验设置，我们基于**开源 Qwen3.6-27B 与 [OpenPerfectBlend](https://huggingface.co/datasets/mlabonne/open-perfectblend)**，补充短文本训练和公开数据集评测，并纳入 [DFlash2](https://inco.ai/blog/dflash2/) 等起草方法，考察 DMTP 与不同 DFlash 优化的正交性。
 
 各组使用相同的数据与训练预算，冻结目标模型和原生 MTP。起草模型统一为五层，动态序列长度最长 2K，全局批量 128，在八张 GPU 上以 BF16 训练三个 epoch，约 31K 步。
 
@@ -379,6 +379,10 @@ DMTP 仍是一次初步探索。我们将继续分享更多模型与场景下的
 2. [DSpark: Confidence-Scheduled Speculative Decoding with Semi-Autoregressive Generation](https://arxiv.org/abs/2607.05147)
 3. [SpecForge v0.3.0](https://www.lmsys.org/blog/2026-08-04-specforge-v0-3)
 4. [Domino: Decoupling Causal Modeling from Autoregressive Drafting in Speculative Decoding](https://arxiv.org/abs/2605.29707) · [官方代码](https://github.com/jianuo-huang/Domino)
+5. [EAGLE-4：官方实现](https://github.com/eagle-hq/EAGLE-4) · [架构与 Efficient LM Head](https://github.com/eagle-hq/EAGLE-4/blob/main/docs/architecture.md)
+6. [DFlash 2: Keep Drafting Parallel](https://inco.ai/blog/dflash2/) · [官方代码](https://github.com/z-lab/dflash)
+7. [OpenPerfectBlend：公开训练数据集](https://huggingface.co/datasets/mlabonne/open-perfectblend)
+8. [SGLang：推理框架](https://github.com/sgl-project/sglang)
 
 ## 致谢
 

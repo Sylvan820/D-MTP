@@ -326,7 +326,7 @@ We compute end-to-end throughput as total output tokens divided by workload comp
 
 ## 8. Open-Source Reproduction and Evaluation
 
-To support reproduction and align with open-source settings, we add short-context training and public benchmark evaluation using **public Qwen3.6-27B weights and OpenPerfectBlend**. We also include drafting methods such as DFlash2 to examine how DMTP complements different DFlash optimizations.
+To support reproduction and align with open-source settings, we add short-context training and public benchmark evaluation using **public Qwen3.6-27B weights and [OpenPerfectBlend](https://huggingface.co/datasets/mlabonne/open-perfectblend)**. We also include drafting methods such as [DFlash2](https://inco.ai/blog/dflash2/) to examine how DMTP complements different DFlash optimizations.
 
 All variants share the same data and training budget, with the target model and native MTP frozen. We use five-layer drafts, dynamic sequences up to 2K, and a global batch size of 128, training on eight GPUs in BF16 for three epochs, or approximately 31K steps.
 
@@ -381,6 +381,10 @@ DMTP is still an initial exploration. We will share results across more models a
 2. [DSpark: Confidence-Scheduled Speculative Decoding with Semi-Autoregressive Generation](https://arxiv.org/abs/2607.05147)
 3. [SpecForge v0.3.0](https://www.lmsys.org/blog/2026-08-04-specforge-v0-3)
 4. [Domino: Decoupling Causal Modeling from Autoregressive Drafting in Speculative Decoding](https://arxiv.org/abs/2605.29707) · [Official code](https://github.com/jianuo-huang/Domino)
+5. [EAGLE-4: Official implementation](https://github.com/eagle-hq/EAGLE-4) · [Architecture and Efficient LM Head](https://github.com/eagle-hq/EAGLE-4/blob/main/docs/architecture.md)
+6. [DFlash 2: Keep Drafting Parallel](https://inco.ai/blog/dflash2/) · [Official code](https://github.com/z-lab/dflash)
+7. [OpenPerfectBlend: Public training dataset](https://huggingface.co/datasets/mlabonne/open-perfectblend)
+8. [SGLang: Inference framework](https://github.com/sgl-project/sglang)
 
 ## Acknowledgements
 
