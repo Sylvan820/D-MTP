@@ -327,27 +327,15 @@ We compute end-to-end throughput as total output tokens divided by workload comp
 
 We train **DFlash, DFlash2, and their DMTP counterparts** using public Qwen3.6-27B weights and OpenPerfectBlend. All four share the same data and training budget; the target model and native MTP remain frozen.
 
-We use a five-layer draft, dynamic sequences up to 2K, and a global batch size of 128. We train for three epochs, about 31K steps, on eight GPUs in BF16. The learning rate follows cosine decay from 1e-3 to 3e-5, with 800 warmup steps.
+We use a five-layer draft, dynamic sequences up to 2K, and a global batch size of 128. We train for three epochs on eight GPUs in BF16.
 
-**DFlash** uses position-decayed cross-entropy with gamma = 4. **DFlash2** uses the following design:
-
-- **Block-local mixing.** Dynamic grouped convolutions surround attention and feed-forward sublayers, with kernel size 2 and group size 16.
-- **Path selection.** A rank-256 selector scores transitions between consecutive tokens within each position's top-16 candidates. It is trained with ground-truth predecessors and evaluated along its generated greedy path.
-- **Adaptive loss.** We derive detached position weights from prefix products and reverse cumulative sums of smoothed ground-truth token probabilities. The objective mixes cross-entropy and probability loss, plus selector cross-entropy at weight 1.
-
-The probability loss is \(1-q(y)\), where \(q(y)\) is the draft probability of the ground-truth token. The cross-entropy mixture weight is \(\exp(-\overline{q(y)})\).
-
-Both baselines propose seven tokens from **[A, MASK × 7]**. DMTP uses **[T1, MASK × 6]**, with MTP-style fusion at T1, preserving the same seven-proposal budget.
+DFlash retains position-decayed cross-entropy; DFlash2 combines block-local mixing, path selection, and adaptive loss. Their DMTP counterparts fuse MTP features at the first candidate position, preserving seven proposals per round.
 
 ### Acceptance-Length Evaluation
 
-We use four-way tensor parallelism, a batch limit of 32, and the first 80 entries in each dataset's original order. Inputs use the target tokenizer's chat template with `enable_thinking=False`, temperature 0, `top_p=1`, and `top_k=-1`.
+We use four-way tensor parallelism, a batch limit of 32, temperature 0, and up to 1,024 output tokens per turn, stopping at EOS. Inputs use the target model's chat template with `enable_thinking=False`; verification is target-only.
 
-Generation stops at EOS or 1,024 output tokens per turn. GSM8K, HumanEval, Alpaca, and MATH500 use single-turn inputs. MT-Bench uses 80 complete two-turn conversations, totaling 160 generations; each model retains its own first-turn response as second-turn history.
-
-Both use FlashAttention-3, CUDA Graph, greedy drafting, and target-only prefix verification.
-
-We use Alpaca and MT-Bench as **out-of-distribution (OOD) chat evaluations** for this OpenPerfectBlend training setup, testing generalization to conversational tasks.
+OpenPerfectBlend focuses on math and code; Alpaca and MT-Bench evaluate chat. We use the first 80 entries from each dataset. MT-Bench retains complete two-turn conversations, with each model's own first-turn response carried into the second turn.
 
 <table>
 <colgroup><col style="width:14%"><col style="width:12%"><col style="width:12%"><col style="width:12%"><col style="width:12%"><col style="width:19%"><col style="width:19%"></colgroup>
@@ -360,13 +348,11 @@ We use Alpaca and MT-Bench as **out-of-distribution (OOD) chat evaluations** for
 </table>
 
 
-Both metrics include the target correction or bonus token. **Per-request** averages each generation's mean acceptance length with equal weight. **Per-verify** aggregates over verification rounds: `1 + Σ(k × histogram[k]) / Σhistogram[k]`. Each MT-Bench turn counts as a separate generation.
+We report per-request and per-verification-round mean acceptance lengths, including the target correction or bonus token. Each MT-Bench turn counts separately.
 
-<strong class="acceptance-comparison">DMTP's improvement over DFlash</strong> appears in red parentheses beside each DMTP value, using the same metric and values before rounding.
+<strong class="acceptance-comparison">DMTP's improvement over DFlash</strong> appears in red parentheses.
 
-Native MTP415 uses the same public Qwen3.6-27B target and its bundled MTP weights, with the inputs and sampling settings above. It uses four draft steps, top-k of 1, and five verification slots, proposing four candidates with overlap scheduling disabled.
-
-Its maximum acceptance length is 5, versus 8 for the seven-candidate DFlash and DMTP paths. The native MTP column is therefore a reference, not an equal-candidate-budget ablation.
+Native MTP415 proposes four candidates per round; DFlash and DMTP each propose seven.
 
 ## 9. Future Directions
 

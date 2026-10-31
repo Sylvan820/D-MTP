@@ -326,25 +326,15 @@ DMTP 在六类任务的 T1～T7 位置均获得了更高的累计接受率，表
 
 我们使用**开源 Qwen3.6-27B 权重与 OpenPerfectBlend 数据集**，训练 DFlash、DFlash2 及各自对应的 DMTP 版本。四组采用相同的数据与训练预算，目标模型和原生 MTP 保持冻结。
 
-我们使用五层起草模型、最长 2K 的动态序列长度和 128 的全局批量，在八张 GPU 上以 BF16 训练三个 epoch，约 31K 步。学习率从 1e-3 余弦衰减至 3e-5，预热 800 步。
+我们使用五层起草模型、最长 2K 的动态序列长度和 128 的全局批量，在八张 GPU 上以 BF16 训练三个 epoch。
 
-**DFlash** 使用位置衰减交叉熵，衰减参数 gamma = 4。**DFlash2** 采用以下设计：
-
-- **块内信息交互。** 在注意力与前馈子层前后加入动态分组卷积，卷积核大小为 2，分组大小为 16。
-- **路径选择。** 使用秩为 256 的选择器，在每个位置概率最高的 16 个候选间学习相邻 token 的转移分数。训练使用真实前驱 token，推理沿贪心生成路径选取后续候选。
-- **自适应损失。** 对平滑后的真实 token 概率做前缀连乘和反向累加，得到不参与梯度计算的位置权重。训练目标混合交叉熵与概率损失，并加入权重为 1 的选择器交叉熵。
-
-概率损失为 \(1-q(y)\)，其中 \(q(y)\) 是起草模型对真实 token 的预测概率；交叉熵的混合权重为 \(\exp(-\overline{q(y)})\)。
-
-两组基线均从 **[A, MASK × 7]** 预测七个候选；对应的 DMTP 版本使用 **[T1, MASK × 6]**，在首个候选位置融合 MTP 表示，保持相同的七候选预算。
+DFlash 沿用位置衰减交叉熵；DFlash2 结合块内信息交互、路径选择与自适应损失。对应的 DMTP 版本在首个候选位置融合 MTP 表示，均保留七个候选。
 
 ### 接受长度评测
 
-我们使用四卡张量并行，批量上限为 32，每个数据集按原始顺序取前 80 条。输入使用目标模型分词器的聊天模板，设置 `enable_thinking=False`、温度 0、`top_p=1`、`top_k=-1`；每轮最多生成 1,024 个 token，遇结束符正常停止。
+我们使用四卡张量并行，批量上限为 32，温度为 0，每轮最多生成 1,024 个 token，遇结束符正常停止。输入统一使用目标模型的聊天模板，设置 `enable_thinking=False`，验证采用 target-only 方式。
 
-GSM8K、HumanEval、Alpaca 与 MATH500 使用单轮输入。MT-Bench 使用 80 个双轮会话，共 160 次生成，第二轮保留各模型自身的第一轮回答。两组均使用 FlashAttention-3、CUDA Graph、贪心起草和 target-only 前缀验证。
-
-我们将 Alpaca 与 MT-Bench 作为这组 OpenPerfectBlend 训练的**分布外（OOD）聊天评测**，检验模型在聊天任务上的泛化能力。
+OpenPerfectBlend 侧重数学与代码，Alpaca 和 MT-Bench 用于聊天评测。每个数据集取前 80 条；MT-Bench 保留完整双轮会话，第二轮使用各模型自身的第一轮回答。
 
 <table>
 <colgroup><col style="width:14%"><col style="width:12%"><col style="width:12%"><col style="width:12%"><col style="width:12%"><col style="width:19%"><col style="width:19%"></colgroup>
@@ -357,11 +347,11 @@ GSM8K、HumanEval、Alpaca 与 MATH500 使用单轮输入。MT-Bench 使用 80 �
 </table>
 
 
-表中同时报告两种平均接受长度，均包含目标模型的修正或 bonus token。**Per-request** 对每次生成的平均接受长度等权平均；**Per-verify** 按实际验证轮次汇总：`1 + Σ(k × histogram[k]) / Σhistogram[k]`。MT-Bench 的两个轮次分别作为生成请求计入。
+表中报告请求级平均（Per-request）与验证轮次平均（Per-verify）接受长度，均包含目标模型的修正或 bonus token；MT-Bench 的每轮生成分别计入。
 
-<strong class="acceptance-comparison">DMTP 相对 DFlash 的提升</strong>以红色括号标在 DMTP 数值后，按同一统计口径的未舍入数值计算。
+<strong class="acceptance-comparison">DMTP 相对 DFlash 的提升</strong>以红色括号标出。
 
-原生 MTP415 使用同一公开 Qwen3.6-27B 及其内置 MTP 权重，沿用上述输入与采样设置。415 表示四步起草、top-k 为 1、五个验证槽位，共提出四个候选，关闭 overlap 调度。其接受长度上限为 5；DFlash 与 DMTP 提出七个候选，上限为 8。因此，原生 MTP 一列作为参考，不是等候选预算消融。
+原生 MTP415 每轮提出四个候选，DFlash 与 DMTP 均为七个。
 
 ## 9. 后续方向
 
