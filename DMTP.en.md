@@ -346,11 +346,11 @@ DMTP is still an initial exploration. We will share results across more models a
 
 ## Acknowledgements
 
-We thank the **Qwen Team, the GLM/Domino Team, the Qwen Application Team, and the SpecForge Team** for their support and discussions. This work was carried out during my **internship with the Qwen Infra team**.
+We thank the **Qwen Team, the Domino Team, the Qwen Application Team, and the SpecForge Team** for their support and discussions. This work was carried out during my **internship with the Qwen Infra team**.
 
 **Qwen Team**: Yuhao Shen, Di Liu, Yucheng Li, Hao Yu, Yang Xu, Xi Lin, Yi Zhang.
 
-**GLM/Domino Team**: Jianuo Huang.
+**Domino Team**: Jianuo Huang.
 
 **Qwen Application Team**: Tianyu Liu, Jun Zhang.
 
