@@ -348,6 +348,10 @@ OpenPerfectBlend 侧重数学与代码，因此我们除数学、代码任务外
 </table>
 
 
+![Qwen3.6-27B 开源短文评测中五种方法的请求级平均接受长度](open27b-acceptance.png)
+
+*图 8：五个公开数据集上的请求级平均接受长度。DMTP(D)、DMTP(D2) 分别采用 DFlash、DFlash2 起草器；柱顶标注两组 DMTP 的数值。*
+
 在这组短输出评测中，DMTP 相对 DFlash 的请求级平均接受长度在五个数据集上均有提升：GSM8K 为 **17.50%**，HumanEval 为 **5.78%**，MATH500 为 **16.67%**，Alpaca 与 MT-Bench 分别为 **21.55%** 和 **17.15%**。
 
 将同样的单 anchor 融合接入 DFlash2 后，五个数据集的接受长度进一步提升 **6.54%～21.83%**，说明 DMTP 的收益可以叠加在 DFlash2 的起草优化之上。

@@ -349,6 +349,10 @@ OpenPerfectBlend focuses on math and code, so we also evaluate chat using Alpaca
 </table>
 
 
+![Per-request mean acceptance length of five methods on public Qwen3.6-27B short-text benchmarks](open27b-acceptance.png)
+
+*Figure 8. Per-request mean acceptance length across five public datasets. DMTP(D) and DMTP(D2) use DFlash and DFlash2 drafts, respectively. Labels show the two DMTP variants' values.*
+
 DMTP improves per-request mean acceptance length over DFlash on all five short-output benchmarks: **17.50%** on GSM8K, **5.78%** on HumanEval, **16.67%** on MATH500, **21.55%** on Alpaca, and **17.15%** on MT-Bench.
 
 Adding the same single-anchor fusion to DFlash2 improves acceptance length by **6.54%–21.83%** across all five datasets, showing that DMTP's gains also build on DFlash2's drafting optimizations.

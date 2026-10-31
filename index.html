@@ -580,6 +580,8 @@ Target：验证七个候选，提交接受前缀与修正/bonus
 </table></div>
 
 
+<figure><a href="open27b-acceptance.png" target="_blank" rel="noopener" title="查看原图"><img loading="lazy" src="open27b-acceptance.png" alt="Qwen3.6-27B 开源短文评测中五种方法的请求级平均接受长度"></a></figure>
+<p><em>图 8：五个公开数据集上的请求级平均接受长度。DMTP(D)、DMTP(D2) 分别采用 DFlash、DFlash2 起草器；柱顶标注两组 DMTP 的数值。</em></p>
 <p>在这组短输出评测中，DMTP 相对 DFlash 的请求级平均接受长度在五个数据集上均有提升：GSM8K 为 <strong>17.50%</strong>，HumanEval 为 <strong>5.78%</strong>，MATH500 为 <strong>16.67%</strong>，Alpaca 与 MT-Bench 分别为 <strong>21.55%</strong> 和 <strong>17.15%</strong>。</p>
 <p>将同样的单 anchor 融合接入 DFlash2 后，五个数据集的接受长度进一步提升 <strong>6.54%～21.83%</strong>，说明 DMTP 的收益可以叠加在 DFlash2 的起草优化之上。</p>
 <p>表中 <strong>DMTP(D)</strong>、<strong>DMTP(D2)</strong> 分别表示以 DFlash、DFlash2 为起草器的 DMTP。数值为<strong>请求级平均接受长度</strong>，包含目标模型的修正或 bonus token，MT-Bench 按轮计入。DFlash、DFlash2 与 DMTP(D) 使用 24,000 步 checkpoint。DFlash 系列及对应的 DMTP 每轮均提出七个候选，原生 MTP415 为四个。</p>
@@ -1184,6 +1186,8 @@ Target:  verify seven candidates and commit the accepted prefix plus correction/
 </table></div>
 
 
+<figure><a href="open27b-acceptance.png" target="_blank" rel="noopener" title="View full-size figure"><img loading="lazy" src="open27b-acceptance.png" alt="Per-request mean acceptance length of five methods on public Qwen3.6-27B short-text benchmarks"></a></figure>
+<p><em>Figure 8. Per-request mean acceptance length across five public datasets. DMTP(D) and DMTP(D2) use DFlash and DFlash2 drafts, respectively. Labels show the two DMTP variants&#39; values.</em></p>
 <p>DMTP improves per-request mean acceptance length over DFlash on all five short-output benchmarks: <strong>17.50%</strong> on GSM8K, <strong>5.78%</strong> on HumanEval, <strong>16.67%</strong> on MATH500, <strong>21.55%</strong> on Alpaca, and <strong>17.15%</strong> on MT-Bench.</p>
 <p>Adding the same single-anchor fusion to DFlash2 improves acceptance length by <strong>6.54%–21.83%</strong> across all five datasets, showing that DMTP&#39;s gains also build on DFlash2&#39;s drafting optimizations.</p>
 <p><strong>DMTP(D)</strong> and <strong>DMTP(D2)</strong> denote DMTP with DFlash and DFlash2 drafts, respectively. We report <strong>per-request mean acceptance length</strong>, including the target correction or bonus token, with MT-Bench counted per turn. DFlash, DFlash2, and DMTP(D) use 24,000-step checkpoints. Both DFlash variants and their DMTP counterparts propose seven candidates per round; native MTP415 proposes four.</p>
