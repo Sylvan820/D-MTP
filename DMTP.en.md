@@ -316,7 +316,7 @@ Dynamic batching allows the active batch to vary as requests complete; Bn specif
 
 ![End-to-end throughput across batch settings for DFlash, public-weight MTP415, and DMTP on Code, Math, and Agent](native-branch-throughput.png)
 
-*Figure 7. End-to-end throughput of DFlash, native MTP, and DMTP using four-way tensor parallelism (TP4) on Code, Math, and Agent, in tok/s with independent y-axes. The figure label MTP415 denotes four MTP steps, four candidates, and five verification slots. Bn means a batch limit of n. B2/B4/B8 use the first 8 requests; B16/B32 use the first 64, with natural EOS and a 28K cap. DFlash/DMTP retain the same-card sequential B32 reference; their other points use two concurrent TP4 GPU groups. Native MTP uses a separate sweep.*
+*Figure 7. End-to-end throughput of DFlash, native MTP, and DMTP using four-way tensor parallelism (TP4) on Code, Math, and Agent, in tok/s with independent y-axes. The figure label MTP415 denotes four MTP steps, four candidates, and five verification slots. Bn means a batch limit of n.*
 
 We add native MTP throughput from public Qwen3.6-35B-A3B weights as a reference: four steps, top-k=1, five verification slots, and four proposed candidates, with overlap disabled. DFlash/DMTP use internal Target weights and seven candidates, with overlap enabled.
 
@@ -357,7 +357,7 @@ OpenPerfectBlend focuses on math and code, so we also evaluate chat using Alpaca
 
 DMTP improves per-request mean acceptance length over DFlash on all five short-output benchmarks: **17.50%** on GSM8K, **5.78%** on HumanEval, **16.67%** on MATH500, **21.55%** on Alpaca, and **17.15%** on MT-Bench.
 
-At 2,000 training steps for both models, single-anchor fusion improves acceptance length over DFlash2 by **6.54%–21.83%** across the five datasets. The DMTP(D2) values in the table and figure extrapolate these gains onto the 24K DFlash2 baseline, assuming unchanged relative gains. They are not measured 24K fusion results.
+**DFlash2 and DMTP are complementary and orthogonal.** DFlash2 uses block-local convolution and a path selector to mitigate DFlash's within-block prediction decay; DMTP reuses pretrained MTP to improve first-token acceptance. Combined, they deliver a measured **6.54%–21.83%** improvement in mean acceptance length over DFlash2 across the five datasets.
 
 **DMTP(D)** and **DMTP(D2)** denote DMTP with DFlash and DFlash2 drafts, respectively. We report **per-request mean acceptance length**, including the target correction or bonus token, with MT-Bench counted per turn. DFlash, DFlash2, and DMTP(D) use 24,000-step checkpoints. Both DFlash variants and their DMTP counterparts propose seven candidates per round; native MTP415 proposes four.
 

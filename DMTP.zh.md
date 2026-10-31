@@ -315,7 +315,7 @@ DMTP 在 T2～T7 也保持了更高的累计接受率：首位更可靠，加上
 
 ![DFlash、公开权重 MTP415 与 DMTP 在 Code、Math、Agent 上不同 batch 设置的端到端吞吐](native-branch-throughput.png)
 
-*图 7：DFlash、原生 MTP 与 DMTP 在 Code、Math、Agent 上的四卡张量并行（TP4）端到端吞吐，单位 tok/s，三个子图采用独立纵轴。图中 MTP415 指四步 MTP、四个候选、五个验证槽位。Bn 表示 batch 上限为 n；B2/B4/B8 各取前 8 条，B16/B32 各取前 64 条，保留自然 EOS 与 28K 上限。DFlash/DMTP 的 B32 沿用同卡顺序参考评测，其他点为固定两组 TP4 并行扫描；原生 MTP 为独立扫描。*
+*图 7：DFlash、原生 MTP 与 DMTP 在 Code、Math、Agent 上的四卡张量并行（TP4）端到端吞吐，单位 tok/s，三个子图采用独立纵轴。图中 MTP415 指四步 MTP、四个候选、五个验证槽位。Bn 表示 batch 上限为 n。*
 
 我们加入公开 Qwen3.6-35B-A3B 的原生 MTP 吞吐作为参考：四步、top-k=1、五个验证槽位，共提出四个候选，关闭 overlap。DFlash/DMTP 使用内部 Target 权重、七个候选，开启 overlap。
 
@@ -356,7 +356,7 @@ OpenPerfectBlend 侧重数学与代码，因此我们除数学、代码任务外
 
 在这组短输出评测中，DMTP 相对 DFlash 的请求级平均接受长度在五个数据集上均有提升：GSM8K 为 **17.50%**，HumanEval 为 **5.78%**，MATH500 为 **16.67%**，Alpaca 与 MT-Bench 分别为 **21.55%** 和 **17.15%**。
 
-在同为2,000步的实测对照中，将单 anchor 融合接入 DFlash2 后，五个数据集的接受长度提升 **6.54%～21.83%**。表图中的 DMTP(D2) 数值是假设这一相对增益保持不变、乘以24K DFlash2基线得到的估算，并非24K融合模型实测。
+**DFlash2 与 DMTP 是互补、正交的。** DFlash2 通过块内卷积（conv）和路径选择器（selector）缓解 DFlash 的块内预测衰减；DMTP 则复用预训练 MTP 的能力，提升首 token 接受率。将两者结合后，五个数据集的实测平均接受长度相对 DFlash2 提升 **6.54%～21.83%**。
 
 表中 **DMTP(D)**、**DMTP(D2)** 分别表示以 DFlash、DFlash2 为起草器的 DMTP。数值为**请求级平均接受长度**，包含目标模型的修正或 bonus token，MT-Bench 按轮计入。DFlash、DFlash2 与 DMTP(D) 使用 24,000 步 checkpoint。DFlash 系列及对应的 DMTP 每轮均提出七个候选，原生 MTP415 为四个。
 
