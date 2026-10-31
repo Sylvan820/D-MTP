@@ -363,7 +363,7 @@ DMTP improves per-request mean acceptance length over DFlash on all five short-o
 
 ### First-Candidate T1 Acceptance
 
-We compare DFlash and DMTP(DFLASH) at **24,000 training steps**, using the non-thinking settings and five input sets above. This measures the first draft candidate in each verification round, not the first output token of each request or task accuracy.
+We compare DFlash and DMTP(DFLASH) using the non-thinking settings and five input sets above. This measures the first draft candidate in each verification round, not the first output token of each request or task accuracy.
 
 <table>
 <thead><tr><th class="first-token-dataset" scope="col">Dataset</th><th scope="col">DFlash</th><th scope="col">DMTP(DFLASH)</th><th scope="col">Difference (pp)</th></tr></thead>
@@ -392,6 +392,8 @@ There are several directions we would like to explore:
 - **Larger models.** Extend DMTP to larger target models and explore different MTP–DFlash combinations to evaluate its generalization and acceleration potential at scale.
 
 DMTP is still an initial exploration. We will share results across more models and settings, with the paper and open-source code to follow soon. We welcome reproductions, findings from different models and tasks, and contributions to both training methods and inference implementations. We hope to explore this direction together with the community.
+
+Contact: [riven@zju.edu.cn](mailto:riven@zju.edu.cn).
 
 ## References
 

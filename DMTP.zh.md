@@ -362,7 +362,7 @@ OpenPerfectBlend 侧重数学与代码，因此我们除数学、代码任务外
 
 ### 首候选 T1 接受率
 
-下表比较同为 **24,000步**的 DFlash 与 DMTP(DFLASH)，使用上面的非思考模式和相同五组输入。统计对象是**每个验证轮次的首候选**，不是每条请求开头的第一个输出 token，也不是任务正确率。
+下表比较 DFlash 与 DMTP(DFLASH)，使用上面的非思考模式和相同五组输入。统计对象是**每个验证轮次的首候选**，不是每条请求开头的第一个输出 token，也不是任务正确率。
 
 <table>
 <thead><tr><th class="first-token-dataset" scope="col">数据集</th><th scope="col">DFlash</th><th scope="col">DMTP(DFLASH)</th><th scope="col">差距（百分点）</th></tr></thead>
@@ -390,6 +390,8 @@ OpenPerfectBlend 侧重数学与代码，因此我们除数学、代码任务外
 - **更大的模型。** 将 DMTP 扩展到更大规模的 Target，探索不同的 MTP–DFlash 组合，检验其在更大模型上的泛化能力与加速潜力。
 
 DMTP 仍是一次初步探索。我们将继续分享更多模型与场景下的实验结果，相关论文与开源代码也将于近期公开。欢迎大家复现实验，分享不同模型、数据和任务上的发现，也欢迎参与训练方法与推理实现的改进，一起把这条路线探索得更清楚。
+
+联系邮箱：[riven@zju.edu.cn](mailto:riven@zju.edu.cn)。
 
 ## 参考资料
 

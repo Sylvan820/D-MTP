@@ -587,7 +587,7 @@ Target：验证七个候选，提交接受前缀与修正/bonus
 <p><strong>DFlash2 与 DMTP 是互补、正交的。</strong> DFlash2 通过块内卷积（conv）和路径选择器（selector）缓解 DFlash 的块内预测衰减；DMTP 则复用预训练 MTP 的能力，提升首 token 接受率。将两者结合后，五个数据集的实测平均接受长度相对 DFlash2 提升 <strong>6.54%～21.83%</strong>。</p>
 <p>表中 <strong>DMTP(D)</strong>、<strong>DMTP(D2)</strong> 分别表示以 DFlash、DFlash2 为起草器的 DMTP。数值为<strong>请求级平均接受长度</strong>，包含目标模型的修正或 bonus token，MT-Bench 按轮计入。DFlash、DFlash2 与 DMTP(D) 使用 24,000 步 checkpoint。DFlash 系列及对应的 DMTP 每轮均提出七个候选，原生 MTP415 为四个。</p>
 <h3>首候选 T1 接受率</h3>
-<p>下表比较同为 <strong>24,000步</strong>的 DFlash 与 DMTP(DFLASH)，使用上面的非思考模式和相同五组输入。统计对象是<strong>每个验证轮次的首候选</strong>，不是每条请求开头的第一个输出 token，也不是任务正确率。</p>
+<p>下表比较 DFlash 与 DMTP(DFLASH)，使用上面的非思考模式和相同五组输入。统计对象是<strong>每个验证轮次的首候选</strong>，不是每条请求开头的第一个输出 token，也不是任务正确率。</p>
 <div class="table-scroll" tabindex="0"><table>
 <thead><tr><th class="first-token-dataset" scope="col">数据集</th><th scope="col">DFlash</th><th scope="col">DMTP(DFLASH)</th><th scope="col">差距（百分点）</th></tr></thead>
 <tbody><tr><th scope="row">GSM8K</th><td>79.74%</td><td><strong>93.83%</strong></td><td><strong>+14.08</strong></td></tr>
@@ -611,6 +611,7 @@ Target：验证七个候选，提交接受前缀与修正/bonus
 <li><strong>更大的模型。</strong> 将 DMTP 扩展到更大规模的 Target，探索不同的 MTP–DFlash 组合，检验其在更大模型上的泛化能力与加速潜力。</li>
 </ul>
 <p>DMTP 仍是一次初步探索。我们将继续分享更多模型与场景下的实验结果，相关论文与开源代码也将于近期公开。欢迎大家复现实验，分享不同模型、数据和任务上的发现，也欢迎参与训练方法与推理实现的改进，一起把这条路线探索得更清楚。</p>
+<p>联系邮箱：<a href="mailto:riven@zju.edu.cn">riven@zju.edu.cn</a>。</p>
 <h2 id="zh-section-10">参考资料</h2>
 <ol>
 <li><a href="https://z-lab.ai/projects/dflash/">DFlash: Block Diffusion for Flash Speculative Decoding</a></li>
@@ -1211,7 +1212,7 @@ Target:  verify seven candidates and commit the accepted prefix plus correction/
 <p><strong>DFlash2 and DMTP are complementary and orthogonal.</strong> DFlash2 uses block-local convolution and a path selector to mitigate DFlash&#39;s within-block prediction decay; DMTP reuses pretrained MTP to improve first-token acceptance. Combined, they deliver a measured <strong>6.54%–21.83%</strong> improvement in mean acceptance length over DFlash2 across the five datasets.</p>
 <p><strong>DMTP(D)</strong> and <strong>DMTP(D2)</strong> denote DMTP with DFlash and DFlash2 drafts, respectively. We report <strong>per-request mean acceptance length</strong>, including the target correction or bonus token, with MT-Bench counted per turn. DFlash, DFlash2, and DMTP(D) use 24,000-step checkpoints. Both DFlash variants and their DMTP counterparts propose seven candidates per round; native MTP415 proposes four.</p>
 <h3>First-Candidate T1 Acceptance</h3>
-<p>We compare DFlash and DMTP(DFLASH) at <strong>24,000 training steps</strong>, using the non-thinking settings and five input sets above. This measures the first draft candidate in each verification round, not the first output token of each request or task accuracy.</p>
+<p>We compare DFlash and DMTP(DFLASH) using the non-thinking settings and five input sets above. This measures the first draft candidate in each verification round, not the first output token of each request or task accuracy.</p>
 <div class="table-scroll" tabindex="0"><table>
 <thead><tr><th class="first-token-dataset" scope="col">Dataset</th><th scope="col">DFlash</th><th scope="col">DMTP(DFLASH)</th><th scope="col">Difference (pp)</th></tr></thead>
 <tbody><tr><th scope="row">GSM8K</th><td>79.74%</td><td><strong>93.83%</strong></td><td><strong>+14.08</strong></td></tr>
@@ -1235,6 +1236,7 @@ Target:  verify seven candidates and commit the accepted prefix plus correction/
 <li><strong>Larger models.</strong> Extend DMTP to larger target models and explore different MTP–DFlash combinations to evaluate its generalization and acceleration potential at scale.</li>
 </ul>
 <p>DMTP is still an initial exploration. We will share results across more models and settings, with the paper and open-source code to follow soon. We welcome reproductions, findings from different models and tasks, and contributions to both training methods and inference implementations. We hope to explore this direction together with the community.</p>
+<p>Contact: <a href="mailto:riven@zju.edu.cn">riven@zju.edu.cn</a>.</p>
 <h2 id="en-section-10">References</h2>
 <ol>
 <li><a href="https://z-lab.ai/projects/dflash/">DFlash: Block Diffusion for Flash Speculative Decoding</a></li>
