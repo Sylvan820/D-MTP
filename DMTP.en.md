@@ -347,15 +347,20 @@ Generation stops at EOS or 1,024 output tokens per turn. GSM8K, HumanEval, Alpac
 
 Both use FlashAttention-3, CUDA Graph, greedy drafting, and target-only prefix verification.
 
-| Dataset | DFlash | DMTP(DFLASH) | Native MTP415 |
-| --- | ---: | ---: | ---: |
-| GSM8K | 4.318 | **5.074** | 4.373 |
-| HumanEval | 6.424 | **6.795** | 4.698 |
-| Alpaca | 2.763 | 3.358 | **3.529** |
-| MATH500 | 4.258 | **4.968** | 4.377 |
-| MT-Bench | 3.209 | **3.760** | 3.599 |
+<table>
+<colgroup><col style="width:14%"><col style="width:12%"><col style="width:12%"><col style="width:12%"><col style="width:12%"><col style="width:19%"><col style="width:19%"></colgroup>
+<thead><tr><th class="acceptance-dataset" rowspan="2" scope="col">Dataset</th><th class="acceptance-model" colspan="2" scope="colgroup">Native MTP415</th><th class="acceptance-model" colspan="2" scope="colgroup">DFlash</th><th class="acceptance-model" colspan="2" scope="colgroup">DMTP(DFLASH)</th></tr><tr><th class="model-start" scope="col">Per-request</th><th scope="col">Per-verify</th><th class="model-start" scope="col">Per-request</th><th scope="col">Per-verify</th><th class="model-start" scope="col">Per-request</th><th scope="col">Per-verify</th></tr></thead>
+<tbody><tr><th scope="row">GSM8K</th><td class="model-start mtp415">4.373</td><td class="mtp415">4.334</td><td class="model-start dflash">4.318</td><td class="dflash">4.234</td><td class="model-start dmtp"><strong>5.074</strong> <strong class="acceptance-gain">(+17.50%)</strong></td><td class="dmtp"><strong>4.897</strong> <strong class="acceptance-gain">(+15.65%)</strong></td></tr>
+<tr><th scope="row">HumanEval</th><td class="model-start mtp415">4.698</td><td class="mtp415">4.623</td><td class="model-start dflash">6.424</td><td class="dflash">5.804</td><td class="model-start dmtp"><strong>6.795</strong> <strong class="acceptance-gain">(+5.78%)</strong></td><td class="dmtp"><strong>6.245</strong> <strong class="acceptance-gain">(+7.60%)</strong></td></tr>
+<tr><th scope="row">Alpaca</th><td class="model-start mtp415"><strong>3.529</strong></td><td class="mtp415"><strong>3.299</strong></td><td class="model-start dflash">2.763</td><td class="dflash">2.524</td><td class="model-start dmtp">3.358 <strong class="acceptance-gain">(+21.55%)</strong></td><td class="dmtp">3.066 <strong class="acceptance-gain">(+21.48%)</strong></td></tr>
+<tr><th scope="row">MATH500</th><td class="model-start mtp415">4.377</td><td class="mtp415">4.359</td><td class="model-start dflash">4.258</td><td class="dflash">4.207</td><td class="model-start dmtp"><strong>4.968</strong> <strong class="acceptance-gain">(+16.67%)</strong></td><td class="dmtp"><strong>4.918</strong> <strong class="acceptance-gain">(+16.90%)</strong></td></tr>
+<tr><th scope="row">MT-Bench</th><td class="model-start mtp415">3.599</td><td class="mtp415"><strong>3.392</strong></td><td class="model-start dflash">3.209</td><td class="dflash">2.708</td><td class="model-start dmtp"><strong>3.760</strong> <strong class="acceptance-gain">(+17.15%)</strong></td><td class="dmtp">3.246 <strong class="acceptance-gain">(+19.87%)</strong></td></tr></tbody>
+</table>
 
-We report **per-request mean acceptance length**, including the target correction or bonus token, with equal weight per generation. Each MT-Bench turn counts separately.
+
+Both metrics include the target correction or bonus token. **Per-request** averages each generation's mean acceptance length with equal weight. **Per-verify** aggregates over verification rounds: `1 + Σ(k × histogram[k]) / Σhistogram[k]`. Each MT-Bench turn counts as a separate generation.
+
+Red percentages beside DMTP values show the relative improvement over DFlash under the same metric, computed before rounding.
 
 Native MTP415 uses the same public Qwen3.6-27B target and its bundled MTP weights, with the inputs and sampling settings above. It uses four draft steps, top-k of 1, and five verification slots, proposing four candidates with overlap scheduling disabled.
 

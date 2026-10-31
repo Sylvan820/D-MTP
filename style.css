@@ -48,6 +48,16 @@ figure+p:has(>em:only-child) { color:var(--muted); font-size:12px; line-height:1
 figure+p>em:only-child { font-style:normal; }
 .table-scroll { overflow-x:auto; max-width:100%; margin:24px 0; scrollbar-width:thin; }
 table { border-collapse:collapse; width:100%; font-size:12px; line-height:1.7; min-width:540px; }
+table:has(thead th:last-child:nth-child(3)) { min-width:0; }
+table:has(.acceptance-dataset) { table-layout:fixed; min-width:720px; }
+table:has(.acceptance-dataset) .acceptance-dataset { width:14%; text-align:left; vertical-align:middle; }
+table:has(.acceptance-dataset) thead th { text-align:center; white-space:nowrap; }
+table:has(.acceptance-dataset) tbody th { text-align:left; background:transparent; font-weight:550; vertical-align:middle; border-bottom:1px solid var(--rule); }
+table:has(.acceptance-dataset) td { text-align:right; padding-right:16px; font-variant-numeric:tabular-nums; }
+table:has(.acceptance-dataset) .model-start,table:has(.acceptance-dataset) .acceptance-model { border-left:1px solid var(--rule); }
+table:has(.acceptance-dataset) tbody strong { color:var(--green); }
+table:has(.acceptance-dataset) td { white-space:nowrap; padding-right:10px; }
+table:has(.acceptance-dataset) .acceptance-gain { color:#c62828; font-weight:700; }
 th { padding:12px 9px; background:#f5f7f9; font-weight:650; text-align:left; vertical-align:bottom; border-bottom:1px solid #cdd6de; }
 td { padding:12px 9px; border-bottom:1px solid var(--rule); vertical-align:top; font-variant-numeric:tabular-nums; }
 td:first-child { font-weight:550; }
