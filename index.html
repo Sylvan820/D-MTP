@@ -560,7 +560,58 @@ Target：验证七个候选，提交接受前缀与修正/bonus
 <p>我们加入公开 Qwen3.6-35B-A3B 的原生 MTP 吞吐作为参考：四步、top-k=1、五个验证槽位，共提出四个候选，关闭 overlap。DFlash/DMTP 使用内部 Target 权重、七个候选，开启 overlap。</p>
 <p><strong>在 B32 参考评测中，DMTP 在图示三类任务上获得 17.10%～23.75% 的端到端吞吐提升。</strong> Code 从 5526.78 提升至 6564.08 tok/s（+18.77%），Math 从 6054.42 提升至 7089.92 tok/s（+17.10%），与两类任务约 18% 的 per-verify 接受长度提升相呼应。Agent 从 1016.94 提升至 1258.44 tok/s（+23.75%）。</p>
 <p>我们用总输出 token 数除以整组请求的完成时间计算端到端吞吐，覆盖排队、输入预填充和解码；输出遇到结束符（EOS）时正常停止。</p>
-<h2 id="zh-section-8">8. 后续方向</h2>
+<h2 id="zh-section-8">8. 开源复现与评测</h2>
+<p>我们使用<strong>开源 Qwen3.6-27B 权重与 OpenPerfectBlend 数据集</strong>，训练 DFlash、DFlash2 及各自对应的 DMTP 版本。四组采用相同的数据与训练预算，目标模型和原生 MTP 保持冻结。</p>
+<p>我们使用五层起草模型、最长 2K 的动态序列长度和 128 的全局批量，在八张 GPU 上以 BF16 训练三个 epoch，约 31K 步。学习率从 1e-3 余弦衰减至 3e-5，预热 800 步。</p>
+<p><strong>DFlash</strong> 使用位置衰减交叉熵，衰减参数 gamma = 4。<strong>DFlash2</strong> 采用以下设计：</p>
+<ul>
+<li><strong>块内信息交互。</strong> 在注意力与前馈子层前后加入动态分组卷积，卷积核大小为 2，分组大小为 16。</li>
+<li><strong>路径选择。</strong> 使用秩为 256 的选择器，在每个位置概率最高的 16 个候选间学习相邻 token 的转移分数。训练使用真实前驱 token，推理沿贪心生成路径选取后续候选。</li>
+<li><strong>自适应损失。</strong> 对平滑后的真实 token 概率做前缀连乘和反向累加，得到不参与梯度计算的位置权重。训练目标混合交叉熵与概率损失，并加入权重为 1 的选择器交叉熵。</li>
+</ul>
+<p>概率损失为 <span class="inline-math"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mn>1</mn><mo>−</mo><mi>q</mi><mo stretchy="false">(</mo><mi>y</mi><mo stretchy="false">)</mo></mrow><annotation encoding="application/x-tex">1-q(y)</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.7278em;vertical-align:-0.0833em;"></span><span class="mord">1</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">−</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord mathnormal" style="margin-right:0.03588em;">q</span><span class="mopen">(</span><span class="mord mathnormal" style="margin-right:0.03588em;">y</span><span class="mclose">)</span></span></span></span></span>，其中 <span class="inline-math"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>q</mi><mo stretchy="false">(</mo><mi>y</mi><mo stretchy="false">)</mo></mrow><annotation encoding="application/x-tex">q(y)</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord mathnormal" style="margin-right:0.03588em;">q</span><span class="mopen">(</span><span class="mord mathnormal" style="margin-right:0.03588em;">y</span><span class="mclose">)</span></span></span></span></span> 是起草模型对真实 token 的预测概率；交叉熵的混合权重为 <span class="inline-math"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>exp</mi><mo>⁡</mo><mo stretchy="false">(</mo><mo>−</mo><mover accent="true"><mrow><mi>q</mi><mo stretchy="false">(</mo><mi>y</mi><mo stretchy="false">)</mo></mrow><mo stretchy="true">‾</mo></mover><mo stretchy="false">)</mo></mrow><annotation encoding="application/x-tex">\exp(-\overline{q(y)})</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1.2em;vertical-align:-0.25em;"></span><span class="mop">exp</span><span class="mopen">(</span><span class="mord">−</span><span class="mord overline"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.95em;"><span style="top:-3em;"><span class="pstrut" style="height:3em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.03588em;">q</span><span class="mopen">(</span><span class="mord mathnormal" style="margin-right:0.03588em;">y</span><span class="mclose">)</span></span></span><span style="top:-3.87em;"><span class="pstrut" style="height:3em;"></span><span class="overline-line" style="border-bottom-width:0.04em;"></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.25em;"><span></span></span></span></span></span><span class="mclose">)</span></span></span></span></span>。</p>
+<p>两组基线均从 <strong>[A, MASK × 7]</strong> 预测七个候选；对应的 DMTP 版本使用 <strong>[T1, MASK × 6]</strong>，在首个候选位置融合 MTP 表示，保持相同的七候选预算。</p>
+<h3>非思考模式下的接受长度</h3>
+<p>我们选取训练至 <strong>24,000 步</strong>的 DFlash 与 <strong>DMTP(DFLASH)</strong> 进行评测。后者使用 DFlash 起草器；两者共用开源 Qwen3.6-27B 目标模型，每轮均提出七个候选。</p>
+<p>训练使用 OpenPerfectBlend 的<strong>非思考式回答</strong>，评测也关闭思考模式，保持一致的回答形式。</p>
+<p>我们使用四卡张量并行，批量上限为 32，每个数据集按原始顺序取前 80 条。输入使用目标模型分词器的聊天模板，设置 <code>enable_thinking=False</code>、温度 0、<code>top_p=1</code>、<code>top_k=-1</code>；每轮最多生成 1,024 个 token，遇结束符正常停止。</p>
+<p>GSM8K、HumanEval、Alpaca 与 MATH500 使用单轮输入。MT-Bench 使用 80 个双轮会话，共 160 次生成，第二轮保留各模型自身的第一轮回答。两组均使用 FlashAttention-3、CUDA Graph、贪心起草和 target-only 前缀验证。</p>
+<div class="table-scroll" tabindex="0"><table>
+<thead>
+<tr>
+<th>数据集</th>
+<th align="right">DFlash</th>
+<th align="right">DMTP(DFLASH)</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>GSM8K</td>
+<td align="right">4.318</td>
+<td align="right"><strong>5.074</strong></td>
+</tr>
+<tr>
+<td>HumanEval</td>
+<td align="right">6.424</td>
+<td align="right"><strong>6.795</strong></td>
+</tr>
+<tr>
+<td>Alpaca</td>
+<td align="right">2.763</td>
+<td align="right"><strong>3.358</strong></td>
+</tr>
+<tr>
+<td>MATH500</td>
+<td align="right">4.258</td>
+<td align="right"><strong>4.968</strong></td>
+</tr>
+<tr>
+<td>MT-Bench</td>
+<td align="right">3.209</td>
+<td align="right"><strong>3.760</strong></td>
+</tr>
+</tbody></table></div>
+<p>我们报告<strong>请求级平均接受长度</strong>，包含目标模型的修正或 bonus token，各次生成等权平均；MT-Bench 的两个轮次分别计入。</p>
+<h2 id="zh-section-9">9. 后续方向</h2>
 <p><strong>DMTP 的一个局限，是它依赖原生 MTP 的首位预测能力。</strong> 如果 MTP 在某些场景下训练不够充分，它的首 token 接受率可能低于经过任务数据微调的 DFlash。这时，直接把首位交给 MTP 未必是更好的选择。我们还需要进一步探索这种差异，以及如何通过训练和两者的协作改善这些场景。</p>
 <p>我们还想继续探索几个方向：</p>
 <ul>
@@ -572,20 +623,20 @@ Target：验证七个候选，提交接受前缀与修正/bonus
 <li><strong>更大的模型。</strong> 将 DMTP 扩展到更大规模的 Target，探索不同的 MTP–DFlash 组合，检验其在更大模型上的泛化能力与加速潜力。</li>
 </ul>
 <p>DMTP 仍是一次初步探索。我们将继续分享更多模型与场景下的实验结果，相关论文与开源代码也将于近期公开。欢迎大家复现实验，分享不同模型、数据和任务上的发现，也欢迎参与训练方法与推理实现的改进，一起把这条路线探索得更清楚。</p>
-<h2 id="zh-section-9">参考资料</h2>
+<h2 id="zh-section-10">参考资料</h2>
 <ol>
 <li><a href="https://z-lab.ai/projects/dflash/">DFlash: Block Diffusion for Flash Speculative Decoding</a></li>
 <li><a href="https://arxiv.org/abs/2607.05147">DSpark: Confidence-Scheduled Speculative Decoding with Semi-Autoregressive Generation</a></li>
 <li><a href="https://www.lmsys.org/blog/2026-08-04-specforge-v0-3">SpecForge v0.3.0</a></li>
 <li><a href="https://arxiv.org/abs/2605.29707">Domino: Decoupling Causal Modeling from Autoregressive Drafting in Speculative Decoding</a> · <a href="https://github.com/jianuo-huang/Domino">官方代码</a></li>
 </ol>
-<h2 id="zh-section-10">致谢</h2>
+<h2 id="zh-section-11">致谢</h2>
 <p>感谢 <strong>Qwen Team、Domino Team、Qwen Application Team 和 SpecForge Team</strong> 的支持与交流。这项工作是在我于 <strong>Qwen Infra 团队实习期间</strong>完成的。</p>
 <p><strong>Qwen Team</strong>：Yuhao Shen、Di Liu、Yucheng Li、Hao Yu、Yang Xu、Xi Lin、Yi Zhang。</p>
 <p><strong>Domino Team</strong>：Jianuo Huang。</p>
 <p><strong>Qwen Application Team</strong>：Tianyu Liu、Jun Zhang。</p>
 <p><strong>SpecForge Team</strong>：Jiaping Wang。</p>
-<h2 id="zh-section-11">引用</h2>
+<h2 id="zh-section-12">引用</h2>
 <p>如果这项工作对你有帮助，欢迎引用这篇技术博客：</p>
 <pre><code class="language-bibtex">@misc{shen2026dmtp,
   author = {Shen, Yuhao},
@@ -1141,7 +1192,59 @@ Target:  verify seven candidates and commit the accepted prefix plus correction/
 <p>We add native MTP throughput from public Qwen3.6-35B-A3B weights as a reference: four steps, top-k=1, five verification slots, and four proposed candidates, with overlap disabled. DFlash/DMTP use internal Target weights and seven candidates, with overlap enabled.</p>
 <p><strong>In the B32 reference evaluation, DMTP improves E2E throughput by 17.10%–23.75% across the three plotted workloads.</strong> Code increases from 5526.78 to 6564.08 tok/s (+18.77%) and Math from 6054.42 to 7089.92 tok/s (+17.10%), alongside roughly 18% gains in per-verify acceptance length. Agent increases from 1016.94 to 1258.44 tok/s (+23.75%).</p>
 <p>We compute end-to-end throughput as total output tokens divided by workload completion time, including queueing, prompt prefilling, and decoding. Generation stops normally at the end-of-sequence token (EOS).</p>
-<h2 id="en-section-8">8. Future Directions</h2>
+<h2 id="en-section-8">8. Open-Source Reproduction and Evaluation</h2>
+<p>We train <strong>DFlash, DFlash2, and their DMTP counterparts</strong> using public Qwen3.6-27B weights and OpenPerfectBlend. All four share the same data and training budget; the target model and native MTP remain frozen.</p>
+<p>We use a five-layer draft, dynamic sequences up to 2K, and a global batch size of 128. We train for three epochs, about 31K steps, on eight GPUs in BF16. The learning rate follows cosine decay from 1e-3 to 3e-5, with 800 warmup steps.</p>
+<p><strong>DFlash</strong> uses position-decayed cross-entropy with gamma = 4. <strong>DFlash2</strong> uses the following design:</p>
+<ul>
+<li><strong>Block-local mixing.</strong> Dynamic grouped convolutions surround attention and feed-forward sublayers, with kernel size 2 and group size 16.</li>
+<li><strong>Path selection.</strong> A rank-256 selector scores transitions between consecutive tokens within each position&#39;s top-16 candidates. It is trained with ground-truth predecessors and evaluated along its generated greedy path.</li>
+<li><strong>Adaptive loss.</strong> We derive detached position weights from prefix products and reverse cumulative sums of smoothed ground-truth token probabilities. The objective mixes cross-entropy and probability loss, plus selector cross-entropy at weight 1.</li>
+</ul>
+<p>The probability loss is <span class="inline-math"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mn>1</mn><mo>−</mo><mi>q</mi><mo stretchy="false">(</mo><mi>y</mi><mo stretchy="false">)</mo></mrow><annotation encoding="application/x-tex">1-q(y)</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:0.7278em;vertical-align:-0.0833em;"></span><span class="mord">1</span><span class="mspace" style="margin-right:0.2222em;"></span><span class="mbin">−</span><span class="mspace" style="margin-right:0.2222em;"></span></span><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord mathnormal" style="margin-right:0.03588em;">q</span><span class="mopen">(</span><span class="mord mathnormal" style="margin-right:0.03588em;">y</span><span class="mclose">)</span></span></span></span></span>, where <span class="inline-math"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>q</mi><mo stretchy="false">(</mo><mi>y</mi><mo stretchy="false">)</mo></mrow><annotation encoding="application/x-tex">q(y)</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1em;vertical-align:-0.25em;"></span><span class="mord mathnormal" style="margin-right:0.03588em;">q</span><span class="mopen">(</span><span class="mord mathnormal" style="margin-right:0.03588em;">y</span><span class="mclose">)</span></span></span></span></span> is the draft probability of the ground-truth token. The cross-entropy mixture weight is <span class="inline-math"><span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/Math/MathML"><semantics><mrow><mi>exp</mi><mo>⁡</mo><mo stretchy="false">(</mo><mo>−</mo><mover accent="true"><mrow><mi>q</mi><mo stretchy="false">(</mo><mi>y</mi><mo stretchy="false">)</mo></mrow><mo stretchy="true">‾</mo></mover><mo stretchy="false">)</mo></mrow><annotation encoding="application/x-tex">\exp(-\overline{q(y)})</annotation></semantics></math></span><span class="katex-html" aria-hidden="true"><span class="base"><span class="strut" style="height:1.2em;vertical-align:-0.25em;"></span><span class="mop">exp</span><span class="mopen">(</span><span class="mord">−</span><span class="mord overline"><span class="vlist-t vlist-t2"><span class="vlist-r"><span class="vlist" style="height:0.95em;"><span style="top:-3em;"><span class="pstrut" style="height:3em;"></span><span class="mord"><span class="mord mathnormal" style="margin-right:0.03588em;">q</span><span class="mopen">(</span><span class="mord mathnormal" style="margin-right:0.03588em;">y</span><span class="mclose">)</span></span></span><span style="top:-3.87em;"><span class="pstrut" style="height:3em;"></span><span class="overline-line" style="border-bottom-width:0.04em;"></span></span></span><span class="vlist-s">​</span></span><span class="vlist-r"><span class="vlist" style="height:0.25em;"><span></span></span></span></span></span><span class="mclose">)</span></span></span></span></span>.</p>
+<p>Both baselines propose seven tokens from <strong>[A, MASK × 7]</strong>. DMTP uses <strong>[T1, MASK × 6]</strong>, with MTP-style fusion at T1, preserving the same seven-proposal budget.</p>
+<h3>Acceptance Length Without Thinking</h3>
+<p>We evaluate DFlash and <strong>DMTP(DFLASH)</strong> at <strong>24,000 training steps</strong>. The latter uses a DFlash drafter; both share the public Qwen3.6-27B target model and propose seven candidates per round.</p>
+<p>We train on <strong>non-thinking responses</strong> from OpenPerfectBlend and disable thinking during evaluation to keep the response format consistent.</p>
+<p>We use four-way tensor parallelism, a batch limit of 32, and the first 80 entries in each dataset&#39;s original order. Inputs use the target tokenizer&#39;s chat template with <code>enable_thinking=False</code>, temperature 0, <code>top_p=1</code>, and <code>top_k=-1</code>.</p>
+<p>Generation stops at EOS or 1,024 output tokens per turn. GSM8K, HumanEval, Alpaca, and MATH500 use single-turn inputs. MT-Bench uses 80 complete two-turn conversations, totaling 160 generations; each model retains its own first-turn response as second-turn history.</p>
+<p>Both use FlashAttention-3, CUDA Graph, greedy drafting, and target-only prefix verification.</p>
+<div class="table-scroll" tabindex="0"><table>
+<thead>
+<tr>
+<th>Dataset</th>
+<th align="right">DFlash</th>
+<th align="right">DMTP(DFLASH)</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>GSM8K</td>
+<td align="right">4.318</td>
+<td align="right"><strong>5.074</strong></td>
+</tr>
+<tr>
+<td>HumanEval</td>
+<td align="right">6.424</td>
+<td align="right"><strong>6.795</strong></td>
+</tr>
+<tr>
+<td>Alpaca</td>
+<td align="right">2.763</td>
+<td align="right"><strong>3.358</strong></td>
+</tr>
+<tr>
+<td>MATH500</td>
+<td align="right">4.258</td>
+<td align="right"><strong>4.968</strong></td>
+</tr>
+<tr>
+<td>MT-Bench</td>
+<td align="right">3.209</td>
+<td align="right"><strong>3.760</strong></td>
+</tr>
+</tbody></table></div>
+<p>We report <strong>per-request mean acceptance length</strong>, including the target correction or bonus token, with equal weight per generation. Each MT-Bench turn counts separately.</p>
+<h2 id="en-section-9">9. Future Directions</h2>
 <p><strong>One limitation of DMTP is its reliance on native MTP&#39;s first-token prediction.</strong> When MTP is insufficiently trained for a particular setting, its first-token acceptance can be lower than that of a DFlash model fine-tuned on relevant task data. Delegating the first token to MTP may then be the weaker choice. We want to better understand this gap and explore how training and cooperation between the two models can improve those settings.</p>
 <p>Beyond the current target-only verifier, we plan to explore <strong>rejection sampling and block verify</strong>, evaluating acceptance length, sampling consistency, and end-to-end throughput.</p>
 <p>There are several directions we would like to explore:</p>
@@ -1153,20 +1256,20 @@ Target:  verify seven candidates and commit the accepted prefix plus correction/
 <li><strong>Larger models.</strong> Extend DMTP to larger target models and explore different MTP–DFlash combinations to evaluate its generalization and acceleration potential at scale.</li>
 </ul>
 <p>DMTP is still an initial exploration. We will share results across more models and settings, with the paper and open-source code to follow soon. We welcome reproductions, findings from different models and tasks, and contributions to both training methods and inference implementations. We hope to explore this direction together with the community.</p>
-<h2 id="en-section-9">References</h2>
+<h2 id="en-section-10">References</h2>
 <ol>
 <li><a href="https://z-lab.ai/projects/dflash/">DFlash: Block Diffusion for Flash Speculative Decoding</a></li>
 <li><a href="https://arxiv.org/abs/2607.05147">DSpark: Confidence-Scheduled Speculative Decoding with Semi-Autoregressive Generation</a></li>
 <li><a href="https://www.lmsys.org/blog/2026-08-04-specforge-v0-3">SpecForge v0.3.0</a></li>
 <li><a href="https://arxiv.org/abs/2605.29707">Domino: Decoupling Causal Modeling from Autoregressive Drafting in Speculative Decoding</a> · <a href="https://github.com/jianuo-huang/Domino">Official code</a></li>
 </ol>
-<h2 id="en-section-10">Acknowledgements</h2>
+<h2 id="en-section-11">Acknowledgements</h2>
 <p>We thank the <strong>Qwen Team, the Domino Team, the Qwen Application Team, and the SpecForge Team</strong> for their support and discussions. This work was carried out during my <strong>internship with the Qwen Infra team</strong>.</p>
 <p><strong>Qwen Team</strong>: Yuhao Shen, Di Liu, Yucheng Li, Hao Yu, Yang Xu, Xi Lin, Yi Zhang.</p>
 <p><strong>Domino Team</strong>: Jianuo Huang.</p>
 <p><strong>Qwen Application Team</strong>: Tianyu Liu, Jun Zhang.</p>
 <p><strong>SpecForge Team</strong>: Jiaping Wang.</p>
-<h2 id="en-section-11">Citation</h2>
+<h2 id="en-section-12">Citation</h2>
 <p>If you find this work useful, please consider citing this technical blog:</p>
 <pre><code class="language-bibtex">@misc{shen2026dmtp,
   author = {Shen, Yuhao},
@@ -1179,7 +1282,7 @@ Target:  verify seven candidates and commit the accepted prefix plus correction/
 <footer class="article-footer"><strong>DMTP</strong><span data-lang="zh" hidden>MTP 生成首个候选，DFlash 并行续写。</span><span data-lang="en">MTP starts. DFlash continues.</span><a data-download="zh" href="DMTP.zh.md" download hidden>Markdown ↓</a><a data-download="en" href="DMTP.en.md" download>Markdown ↓</a></footer>
 </div>
 <aside class="contents" aria-label="Contents"><p data-lang="zh" hidden>本文内容</p><p data-lang="en">ON THIS PAGE</p>
-<nav data-lang="zh" hidden><a href="#zh-section-0">核心观察</a><a href="#zh-section-1">1. 首位接受率与并行 Draft</a><a href="#zh-section-2">2. DMTP：MTP 生成首个候选，DFlash 并行续写</a><a href="#zh-section-3">3. MTP 表示的注入方式</a><a href="#zh-section-4">4. DMTP 训练流程</a><a href="#zh-section-5">5. 推理流程：先 MTP，再 DFlash</a><a href="#zh-section-6">6. 推理实现与系统优化</a><a href="#zh-section-7">7. 主方法的六类生成评测</a><a href="#zh-section-8">8. 后续方向</a><a href="#zh-section-9">参考资料</a><a href="#zh-section-10">致谢</a><a href="#zh-section-11">引用</a></nav><nav data-lang="en"><a href="#en-section-0">The Key Observations</a><a href="#en-section-1">1. First-Token Acceptance and Parallel Drafting</a><a href="#en-section-2">2. DMTP: MTP Starts, DFlash Continues</a><a href="#en-section-3">3. MTP Hidden-State Integration and Ablations</a><a href="#en-section-4">4. Training DMTP</a><a href="#en-section-5">5. Inference: MTP First, DFlash Second</a><a href="#en-section-6">6. Inference Implementation and Systems Optimizations</a><a href="#en-section-7">7. Main-Method Evaluation Across Six Workloads</a><a href="#en-section-8">8. Future Directions</a><a href="#en-section-9">References</a><a href="#en-section-10">Acknowledgements</a><a href="#en-section-11">Citation</a></nav>
+<nav data-lang="zh" hidden><a href="#zh-section-0">核心观察</a><a href="#zh-section-1">1. 首位接受率与并行 Draft</a><a href="#zh-section-2">2. DMTP：MTP 生成首个候选，DFlash 并行续写</a><a href="#zh-section-3">3. MTP 表示的注入方式</a><a href="#zh-section-4">4. DMTP 训练流程</a><a href="#zh-section-5">5. 推理流程：先 MTP，再 DFlash</a><a href="#zh-section-6">6. 推理实现与系统优化</a><a href="#zh-section-7">7. 主方法的六类生成评测</a><a href="#zh-section-8">8. 开源复现与评测</a><a href="#zh-section-9">9. 后续方向</a><a href="#zh-section-10">参考资料</a><a href="#zh-section-11">致谢</a><a href="#zh-section-12">引用</a></nav><nav data-lang="en"><a href="#en-section-0">The Key Observations</a><a href="#en-section-1">1. First-Token Acceptance and Parallel Drafting</a><a href="#en-section-2">2. DMTP: MTP Starts, DFlash Continues</a><a href="#en-section-3">3. MTP Hidden-State Integration and Ablations</a><a href="#en-section-4">4. Training DMTP</a><a href="#en-section-5">5. Inference: MTP First, DFlash Second</a><a href="#en-section-6">6. Inference Implementation and Systems Optimizations</a><a href="#en-section-7">7. Main-Method Evaluation Across Six Workloads</a><a href="#en-section-8">8. Open-Source Reproduction and Evaluation</a><a href="#en-section-9">9. Future Directions</a><a href="#en-section-10">References</a><a href="#en-section-11">Acknowledgements</a><a href="#en-section-12">Citation</a></nav>
 <div class="edition-status"><span class="status-dot"></span><span data-lang="zh" hidden>技术博客<br>2026 年 10 月 30 日</span><span data-lang="en">Technical blog<br>October 30, 2026</span></div>
 </aside></main>
 <script src="app.js"></script></body></html>

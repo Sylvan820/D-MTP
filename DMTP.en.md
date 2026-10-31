@@ -321,7 +321,45 @@ We add native MTP throughput from public Qwen3.6-35B-A3B weights as a reference:
 
 We compute end-to-end throughput as total output tokens divided by workload completion time, including queueing, prompt prefilling, and decoding. Generation stops normally at the end-of-sequence token (EOS).
 
-## 8. Future Directions
+## 8. Open-Source Reproduction and Evaluation
+
+We train **DFlash, DFlash2, and their DMTP counterparts** using public Qwen3.6-27B weights and OpenPerfectBlend. All four share the same data and training budget; the target model and native MTP remain frozen.
+
+We use a five-layer draft, dynamic sequences up to 2K, and a global batch size of 128. We train for three epochs, about 31K steps, on eight GPUs in BF16. The learning rate follows cosine decay from 1e-3 to 3e-5, with 800 warmup steps.
+
+**DFlash** uses position-decayed cross-entropy with gamma = 4. **DFlash2** uses the following design:
+
+- **Block-local mixing.** Dynamic grouped convolutions surround attention and feed-forward sublayers, with kernel size 2 and group size 16.
+- **Path selection.** A rank-256 selector scores transitions between consecutive tokens within each position's top-16 candidates. It is trained with ground-truth predecessors and evaluated along its generated greedy path.
+- **Adaptive loss.** We derive detached position weights from prefix products and reverse cumulative sums of smoothed ground-truth token probabilities. The objective mixes cross-entropy and probability loss, plus selector cross-entropy at weight 1.
+
+The probability loss is \(1-q(y)\), where \(q(y)\) is the draft probability of the ground-truth token. The cross-entropy mixture weight is \(\exp(-\overline{q(y)})\).
+
+Both baselines propose seven tokens from **[A, MASK × 7]**. DMTP uses **[T1, MASK × 6]**, with MTP-style fusion at T1, preserving the same seven-proposal budget.
+
+### Acceptance Length Without Thinking
+
+We evaluate DFlash and **DMTP(DFLASH)** at **24,000 training steps**. The latter uses a DFlash drafter; both share the public Qwen3.6-27B target model and propose seven candidates per round.
+
+We train on **non-thinking responses** from OpenPerfectBlend and disable thinking during evaluation to keep the response format consistent.
+
+We use four-way tensor parallelism, a batch limit of 32, and the first 80 entries in each dataset's original order. Inputs use the target tokenizer's chat template with `enable_thinking=False`, temperature 0, `top_p=1`, and `top_k=-1`.
+
+Generation stops at EOS or 1,024 output tokens per turn. GSM8K, HumanEval, Alpaca, and MATH500 use single-turn inputs. MT-Bench uses 80 complete two-turn conversations, totaling 160 generations; each model retains its own first-turn response as second-turn history.
+
+Both use FlashAttention-3, CUDA Graph, greedy drafting, and target-only prefix verification.
+
+| Dataset | DFlash | DMTP(DFLASH) |
+| --- | ---: | ---: |
+| GSM8K | 4.318 | **5.074** |
+| HumanEval | 6.424 | **6.795** |
+| Alpaca | 2.763 | **3.358** |
+| MATH500 | 4.258 | **4.968** |
+| MT-Bench | 3.209 | **3.760** |
+
+We report **per-request mean acceptance length**, including the target correction or bonus token, with equal weight per generation. Each MT-Bench turn counts separately.
+
+## 9. Future Directions
 
 **One limitation of DMTP is its reliance on native MTP's first-token prediction.** When MTP is insufficiently trained for a particular setting, its first-token acceptance can be lower than that of a DFlash model fine-tuned on relevant task data. Delegating the first token to MTP may then be the weaker choice. We want to better understand this gap and explore how training and cooperation between the two models can improve those settings.
 
