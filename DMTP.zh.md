@@ -325,7 +325,9 @@ DMTP 在六类任务的 T1～T7 位置均获得了更高的累计接受率，表
 
 ## 8. 开源复现与评测
 
-为便于复现，我们使用**开源 Qwen3.6-27B 权重与 OpenPerfectBlend 数据集**，训练 DFlash、DFlash2 及各自对应的 DMTP 版本。四组采用相同的数据与训练预算，目标模型和原生 MTP 保持冻结。起草模型统一使用五层结构，动态序列长度最长为 2K，全局批量为 128，在八张 GPU 上以 BF16 训练三个 epoch，即完整遍历训练数据三次，约 31K 步。
+为便于复现并对齐开源实验设置，我们基于**开源 Qwen3.6-27B 与 OpenPerfectBlend**，补充短文本训练和公开数据集评测，并纳入 DFlash2 等起草方法，考察 DMTP 与不同 DFlash 优化的正交性。
+
+各组使用相同的数据与训练预算，冻结目标模型和原生 MTP。起草模型统一为五层，动态序列长度最长 2K，全局批量 128，在八张 GPU 上以 BF16 训练三个 epoch，约 31K 步。
 
 DFlash 沿用位置衰减交叉熵，DFlash2 结合块内信息交互、路径选择与自适应损失。在两组基线之上，我们分别加入首个候选位置的 MTP 表示融合，训练对应的 DMTP 版本，保持每轮七个候选的预算不变。
 
@@ -348,9 +350,7 @@ OpenPerfectBlend 侧重数学与代码，因此我们除数学、代码任务外
 
 在这组短输出评测中，DMTP 相对 DFlash 的请求级平均接受长度在五个数据集上均有提升：GSM8K 为 **17.50%**，HumanEval 为 **5.78%**，MATH500 为 **16.67%**，Alpaca 与 MT-Bench 分别为 **21.55%** 和 **17.15%**。
 
-表中报告**请求级平均接受长度（Per-request）**，包含目标模型的修正或 bonus token；MT-Bench 的每轮生成分别计入。最后一列为 DMTP(DFLASH) 相对 DFlash 的提升。原生 MTP415 每轮提出四个候选，DFlash、DFlash2 与 DMTP 均为七个。
-
-表中的 DFlash、DFlash2 与 DMTP(DFLASH) 均使用 24,000 步 checkpoint。DFlash2 保留块内卷积和路径 selector；DMTP(DFLASH) 以普通 DFlash 为并行起草器，不是 DFlash2 与单 anchor 的组合。
+表中报告**请求级平均接受长度**，包含目标模型的修正或 bonus token；MT-Bench 按轮计入，最后一列为 DMTP 相对 DFlash 的提升。DFlash、DFlash2 与 DMTP 均使用 24,000 步 checkpoint，每轮提出七个候选；DMTP(DFLASH) 使用普通 DFlash 起草器，原生 MTP415 则提出四个候选。
 
 ## 9. 后续方向
 

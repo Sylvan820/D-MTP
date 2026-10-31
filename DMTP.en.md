@@ -326,7 +326,9 @@ We compute end-to-end throughput as total output tokens divided by workload comp
 
 ## 8. Open-Source Reproduction and Evaluation
 
-For reproducibility, we train **DFlash, DFlash2, and their DMTP counterparts** using public Qwen3.6-27B weights and OpenPerfectBlend. All four share the same data and training budget, with the target model and native MTP frozen. We use five-layer drafts, dynamic sequences up to 2K, and a global batch size of 128, training on eight GPUs in BF16 for three epochs: three full passes over the data, or approximately 31K steps.
+To support reproduction and align with open-source settings, we add short-context training and public benchmark evaluation using **public Qwen3.6-27B weights and OpenPerfectBlend**. We also include drafting methods such as DFlash2 to examine how DMTP complements different DFlash optimizations.
+
+All variants share the same data and training budget, with the target model and native MTP frozen. We use five-layer drafts, dynamic sequences up to 2K, and a global batch size of 128, training on eight GPUs in BF16 for three epochs, or approximately 31K steps.
 
 DFlash retains position-decayed cross-entropy, while DFlash2 combines block-local mixing, path selection, and adaptive loss. We add MTP representation fusion at the first candidate position to each baseline and train the corresponding DMTP model, preserving seven proposals per round.
 
@@ -349,9 +351,7 @@ OpenPerfectBlend focuses on math and code, so we also evaluate chat using Alpaca
 
 DMTP improves per-request mean acceptance length over DFlash on all five short-output benchmarks: **17.50%** on GSM8K, **5.78%** on HumanEval, **16.67%** on MATH500, **21.55%** on Alpaca, and **17.15%** on MT-Bench.
 
-We report **per-request mean acceptance length**, including the target correction or bonus token, with each MT-Bench turn counted separately. The final column shows DMTP(DFLASH)'s improvement over DFlash. Native MTP415 proposes four candidates per round; DFlash, DFlash2, and DMTP each propose seven.
-
-The DFlash, DFlash2, and DMTP(DFLASH) checkpoints are all evaluated at 24,000 training steps. DFlash2 retains block-local convolution and the path selector. DMTP(DFLASH) uses ordinary DFlash for parallel drafting, not the combination of DFlash2 and single-anchor conditioning.
+We evaluate draft checkpoints at 24,000 steps and report **per-request mean acceptance length**, including the target correction or bonus token, with MT-Bench counted per turn. The final column shows DMTP's improvement over DFlash. DMTP(DFLASH) uses an ordinary DFlash draft and proposes seven candidates per round, as do DFlash and DFlash2; native MTP415 proposes four.
 
 ## 9. Future Directions
 

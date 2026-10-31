@@ -563,7 +563,8 @@ Target：验证七个候选，提交接受前缀与修正/bonus
 <p><strong>在 B32 参考评测中，DMTP 在图示三类任务上获得 17.10%～23.75% 的端到端吞吐提升。</strong> Code 从 5526.78 提升至 6564.08 tok/s（+18.77%），Math 从 6054.42 提升至 7089.92 tok/s（+17.10%），与两类任务约 18% 的 per-verify 接受长度提升相呼应。Agent 从 1016.94 提升至 1258.44 tok/s（+23.75%）。</p>
 <p>我们用总输出 token 数除以整组请求的完成时间计算端到端吞吐，覆盖排队、输入预填充和解码；输出遇到结束符（EOS）时正常停止。</p>
 <h2 id="zh-section-8">8. 开源复现与评测</h2>
-<p>为便于复现，我们使用<strong>开源 Qwen3.6-27B 权重与 OpenPerfectBlend 数据集</strong>，训练 DFlash、DFlash2 及各自对应的 DMTP 版本。四组采用相同的数据与训练预算，目标模型和原生 MTP 保持冻结。起草模型统一使用五层结构，动态序列长度最长为 2K，全局批量为 128，在八张 GPU 上以 BF16 训练三个 epoch，即完整遍历训练数据三次，约 31K 步。</p>
+<p>为便于复现并对齐开源实验设置，我们基于<strong>开源 Qwen3.6-27B 与 OpenPerfectBlend</strong>，补充短文本训练和公开数据集评测，并纳入 DFlash2 等起草方法，考察 DMTP 与不同 DFlash 优化的正交性。</p>
+<p>各组使用相同的数据与训练预算，冻结目标模型和原生 MTP。起草模型统一为五层，动态序列长度最长 2K，全局批量 128，在八张 GPU 上以 BF16 训练三个 epoch，约 31K 步。</p>
 <p>DFlash 沿用位置衰减交叉熵，DFlash2 结合块内信息交互、路径选择与自适应损失。在两组基线之上，我们分别加入首个候选位置的 MTP 表示融合，训练对应的 DMTP 版本，保持每轮七个候选的预算不变。</p>
 <h3>接受长度评测</h3>
 <p>评测使用四卡张量并行，批量上限为 32，温度为 0，每轮最多生成 1,024 个 token，遇结束符正常停止。我们统一使用目标模型的聊天模板，设置 <code>enable_thinking=False</code>，并沿用前文的 target-only 验证方式。</p>
@@ -580,8 +581,7 @@ Target：验证七个候选，提交接受前缀与修正/bonus
 
 
 <p>在这组短输出评测中，DMTP 相对 DFlash 的请求级平均接受长度在五个数据集上均有提升：GSM8K 为 <strong>17.50%</strong>，HumanEval 为 <strong>5.78%</strong>，MATH500 为 <strong>16.67%</strong>，Alpaca 与 MT-Bench 分别为 <strong>21.55%</strong> 和 <strong>17.15%</strong>。</p>
-<p>表中报告<strong>请求级平均接受长度（Per-request）</strong>，包含目标模型的修正或 bonus token；MT-Bench 的每轮生成分别计入。最后一列为 DMTP(DFLASH) 相对 DFlash 的提升。原生 MTP415 每轮提出四个候选，DFlash、DFlash2 与 DMTP 均为七个。</p>
-<p>表中的 DFlash、DFlash2 与 DMTP(DFLASH) 均使用 24,000 步 checkpoint。DFlash2 保留块内卷积和路径 selector；DMTP(DFLASH) 以普通 DFlash 为并行起草器，不是 DFlash2 与单 anchor 的组合。</p>
+<p>表中报告<strong>请求级平均接受长度</strong>，包含目标模型的修正或 bonus token；MT-Bench 按轮计入，最后一列为 DMTP 相对 DFlash 的提升。DFlash、DFlash2 与 DMTP 均使用 24,000 步 checkpoint，每轮提出七个候选；DMTP(DFLASH) 使用普通 DFlash 起草器，原生 MTP415 则提出四个候选。</p>
 <h2 id="zh-section-9">9. 后续方向</h2>
 <p><strong>DMTP 的一个局限，是它依赖原生 MTP 的首位预测能力。</strong> 如果 MTP 在某些场景下训练不够充分，它的首 token 接受率可能低于经过任务数据微调的 DFlash。这时，直接把首位交给 MTP 未必是更好的选择。我们还需要进一步探索这种差异，以及如何通过训练和两者的协作改善这些场景。</p>
 <p>我们还想继续探索几个方向：</p>
@@ -1166,7 +1166,8 @@ Target:  verify seven candidates and commit the accepted prefix plus correction/
 <p><strong>In the B32 reference evaluation, DMTP improves E2E throughput by 17.10%–23.75% across the three plotted workloads.</strong> Code increases from 5526.78 to 6564.08 tok/s (+18.77%) and Math from 6054.42 to 7089.92 tok/s (+17.10%), alongside roughly 18% gains in per-verify acceptance length. Agent increases from 1016.94 to 1258.44 tok/s (+23.75%).</p>
 <p>We compute end-to-end throughput as total output tokens divided by workload completion time, including queueing, prompt prefilling, and decoding. Generation stops normally at the end-of-sequence token (EOS).</p>
 <h2 id="en-section-8">8. Open-Source Reproduction and Evaluation</h2>
-<p>For reproducibility, we train <strong>DFlash, DFlash2, and their DMTP counterparts</strong> using public Qwen3.6-27B weights and OpenPerfectBlend. All four share the same data and training budget, with the target model and native MTP frozen. We use five-layer drafts, dynamic sequences up to 2K, and a global batch size of 128, training on eight GPUs in BF16 for three epochs: three full passes over the data, or approximately 31K steps.</p>
+<p>To support reproduction and align with open-source settings, we add short-context training and public benchmark evaluation using <strong>public Qwen3.6-27B weights and OpenPerfectBlend</strong>. We also include drafting methods such as DFlash2 to examine how DMTP complements different DFlash optimizations.</p>
+<p>All variants share the same data and training budget, with the target model and native MTP frozen. We use five-layer drafts, dynamic sequences up to 2K, and a global batch size of 128, training on eight GPUs in BF16 for three epochs, or approximately 31K steps.</p>
 <p>DFlash retains position-decayed cross-entropy, while DFlash2 combines block-local mixing, path selection, and adaptive loss. We add MTP representation fusion at the first candidate position to each baseline and train the corresponding DMTP model, preserving seven proposals per round.</p>
 <h3>Acceptance-Length Evaluation</h3>
 <p>We evaluate with four-way tensor parallelism, a batch limit of 32, temperature 0, and up to 1,024 output tokens per turn, stopping at EOS. All models use the target model&#39;s chat template with <code>enable_thinking=False</code> and the target-only verification described earlier.</p>
@@ -1183,8 +1184,7 @@ Target:  verify seven candidates and commit the accepted prefix plus correction/
 
 
 <p>DMTP improves per-request mean acceptance length over DFlash on all five short-output benchmarks: <strong>17.50%</strong> on GSM8K, <strong>5.78%</strong> on HumanEval, <strong>16.67%</strong> on MATH500, <strong>21.55%</strong> on Alpaca, and <strong>17.15%</strong> on MT-Bench.</p>
-<p>We report <strong>per-request mean acceptance length</strong>, including the target correction or bonus token, with each MT-Bench turn counted separately. The final column shows DMTP(DFLASH)&#39;s improvement over DFlash. Native MTP415 proposes four candidates per round; DFlash, DFlash2, and DMTP each propose seven.</p>
-<p>The DFlash, DFlash2, and DMTP(DFLASH) checkpoints are all evaluated at 24,000 training steps. DFlash2 retains block-local convolution and the path selector. DMTP(DFLASH) uses ordinary DFlash for parallel drafting, not the combination of DFlash2 and single-anchor conditioning.</p>
+<p>We evaluate draft checkpoints at 24,000 steps and report <strong>per-request mean acceptance length</strong>, including the target correction or bonus token, with MT-Bench counted per turn. The final column shows DMTP&#39;s improvement over DFlash. DMTP(DFLASH) uses an ordinary DFlash draft and proposes seven candidates per round, as do DFlash and DFlash2; native MTP415 proposes four.</p>
 <h2 id="en-section-9">9. Future Directions</h2>
 <p><strong>One limitation of DMTP is its reliance on native MTP&#39;s first-token prediction.</strong> When MTP is insufficiently trained for a particular setting, its first-token acceptance can be lower than that of a DFlash model fine-tuned on relevant task data. Delegating the first token to MTP may then be the weaker choice. We want to better understand this gap and explore how training and cooperation between the two models can improve those settings.</p>
 <p>Beyond the current target-only verifier, we plan to explore <strong>rejection sampling and block verify</strong>, evaluating acceptance length, sampling consistency, and end-to-end throughput.</p>
