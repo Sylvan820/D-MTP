@@ -338,19 +338,19 @@ DFlash 沿用位置衰减交叉熵，DFlash2 结合块内信息交互、路径�
 OpenPerfectBlend 侧重数学与代码，因此我们除数学、代码任务外，也使用 Alpaca 和 MT-Bench 观察聊天场景下的表现。每个数据集取前 80 条；MT-Bench 保留完整双轮会话，第二轮使用各模型自身的第一轮回答。
 
 <table>
-<colgroup><col style="width:15%"><col style="width:18%"><col style="width:13%"><col style="width:19%"><col style="width:13%"><col style="width:22%"></colgroup>
-<thead><tr><th class="acceptance-dataset" scope="col">数据集</th><th class="acceptance-model" scope="col">原生 MTP415</th><th class="acceptance-model" scope="col">DFlash</th><th class="acceptance-model" scope="col">DMTP(DFLASH)</th><th class="acceptance-model" scope="col">DFlash2</th><th scope="col">DMTP 相对 DFlash</th></tr></thead>
-<tbody><tr><th scope="row">GSM8K</th><td class="model-start mtp415">4.373</td><td class="model-start dflash">4.318</td><td class="model-start dmtp"><strong>5.074</strong></td><td class="model-start dflash2">4.595</td><td>+17.50%</td></tr>
-<tr><th scope="row">HumanEval</th><td class="model-start mtp415">4.698</td><td class="model-start dflash">6.424</td><td class="model-start dmtp"><strong>6.795</strong></td><td class="model-start dflash2">6.609</td><td>+5.78%</td></tr>
-<tr><th scope="row">MATH500</th><td class="model-start mtp415">4.377</td><td class="model-start dflash">4.258</td><td class="model-start dmtp"><strong>4.968</strong></td><td class="model-start dflash2">4.536</td><td>+16.67%</td></tr>
-<tr><th scope="row">Alpaca</th><td class="model-start mtp415"><strong>3.529</strong></td><td class="model-start dflash">2.763</td><td class="model-start dmtp">3.358</td><td class="model-start dflash2">2.990</td><td>+21.55%</td></tr>
-<tr><th scope="row">MT-Bench</th><td class="model-start mtp415">3.599</td><td class="model-start dflash">3.209</td><td class="model-start dmtp"><strong>3.760</strong></td><td class="model-start dflash2">3.535</td><td>+17.15%</td></tr></tbody>
+<colgroup><col style="width:15%"><col style="width:17%"><col style="width:12%"><col style="width:19%"><col style="width:25%"><col style="width:12%"></colgroup>
+<thead><tr><th class="acceptance-dataset" scope="col">数据集</th><th class="acceptance-model" scope="col">原生 MTP415</th><th class="acceptance-model" scope="col">DFlash</th><th class="acceptance-model" scope="col">DMTP(DFLASH)</th><th scope="col" style="white-space:normal">DMTP（DFLASH）相对 DFlash</th><th class="acceptance-model" scope="col">DFlash2</th></tr></thead>
+<tbody><tr><th scope="row">GSM8K</th><td class="model-start mtp415">4.373</td><td class="model-start dflash">4.318</td><td class="model-start dmtp"><strong>5.074</strong></td><td>+17.50%</td><td class="model-start dflash2">4.595</td></tr>
+<tr><th scope="row">HumanEval</th><td class="model-start mtp415">4.698</td><td class="model-start dflash">6.424</td><td class="model-start dmtp"><strong>6.795</strong></td><td>+5.78%</td><td class="model-start dflash2">6.609</td></tr>
+<tr><th scope="row">MATH500</th><td class="model-start mtp415">4.377</td><td class="model-start dflash">4.258</td><td class="model-start dmtp"><strong>4.968</strong></td><td>+16.67%</td><td class="model-start dflash2">4.536</td></tr>
+<tr><th scope="row">Alpaca</th><td class="model-start mtp415"><strong>3.529</strong></td><td class="model-start dflash">2.763</td><td class="model-start dmtp">3.358</td><td>+21.55%</td><td class="model-start dflash2">2.990</td></tr>
+<tr><th scope="row">MT-Bench</th><td class="model-start mtp415">3.599</td><td class="model-start dflash">3.209</td><td class="model-start dmtp"><strong>3.760</strong></td><td>+17.15%</td><td class="model-start dflash2">3.535</td></tr></tbody>
 </table>
 
 
 在这组短输出评测中，DMTP 相对 DFlash 的请求级平均接受长度在五个数据集上均有提升：GSM8K 为 **17.50%**，HumanEval 为 **5.78%**，MATH500 为 **16.67%**，Alpaca 与 MT-Bench 分别为 **21.55%** 和 **17.15%**。
 
-表中报告**请求级平均接受长度**，包含目标模型的修正或 bonus token；MT-Bench 按轮计入，最后一列为 DMTP 相对 DFlash 的提升。DFlash、DFlash2 与 DMTP 均使用 24,000 步 checkpoint，每轮提出七个候选；DMTP(DFLASH) 使用普通 DFlash 起草器，原生 MTP415 则提出四个候选。
+表中报告**请求级平均接受长度**，包含目标模型的修正或 bonus token；MT-Bench 按轮计入，并单列 DMTP（DFLASH）相对 DFlash 的提升。DFlash、DFlash2 与 DMTP 均使用 24,000 步 checkpoint，每轮提出七个候选；DMTP(DFLASH) 使用普通 DFlash 起草器，原生 MTP415 则提出四个候选。
 
 ## 9. 后续方向
 
