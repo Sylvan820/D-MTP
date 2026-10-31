@@ -14,7 +14,7 @@
 
 ## 核心观察
 
-- **原生 MTP 的首位优势值得复用。** 在相同目标模型和输入下，我们观察到 MTP 的首 token 接受率高于 DFlash。因此，我们让 MTP 生成首个候选，再由 DFlash 并行预测后六个候选。
+- **复用 MTP 的预训练首位能力。** 我们让 MTP 生成首个候选，再由 DFlash 并行预测后六个候选。在六类任务上，DMTP 相对 DFlash 的首 token 接受率提高 **5.43～12.46 个百分点**，相对提升 **7.23%～21.00%**。
 - **通过隐藏状态，把 MTP 的预训练能力带给 DFlash。** 我们不只让 MTP 生成首个候选，还把预测它时的隐藏状态与候选的词嵌入融合。这样，DFlash 在续写时既能看到具体的候选，也能利用 MTP 在预训练中学到的特征，帮助后续 token 的并行预测。
 - **收益同时覆盖长文与短文任务。** 长文任务中，在 Qwen3.6-35B-A3B 上，DMTP 相对 DFlash 的接受长度提高 **9.25%～19.56%**，B32 端到端吞吐提高 **17.10%～23.75%**。短文任务中，基于公开 Qwen3.6-27B 与 OpenPerfectBlend，DMTP（DFLASH）相对 DFlash 的接受长度提高 **5.78%～21.55%**，DMTP（DFlash2）相对 DFlash2 提高 **6.54%～21.83%**，覆盖数学、代码与聊天任务。
 - **与 MTP、DFlash 的优化正交。** DMTP 改进的是两者的协作方式；更强的预测器、训练方法、候选选择策略和推理 kernel，都可以继续结合到这一框架中。
@@ -270,7 +270,9 @@ DFlash 图重放耗时基本不变，新增阶段主要是 MTP 和 T1 准备。�
 
 *图 6：逐位置累计接受率 P(L≥k)，即每轮验证中前 k 个 draft 候选全部接受的比例，不包含修正/bonus。评测设置同上。*
 
-DMTP 在六类任务的 T1～T7 位置均获得了更高的累计接受率，表明首位增强与后续并行预测可以共同提升整个候选块的接受表现。
+**首 token 接受率相对 DFlash 提高了 5.43～12.46 个百分点，相对提升 7.23%～21.00%。** 其中，Code 从 71.00% 提高到 81.81%，Math 从 73.73% 提高到 83.72%，SWE 从 59.33% 提高到 71.79%。这体现了 DMTP 对原生 MTP 预训练首位预测能力的复用，而不是让 DFlash 从头学习这项能力。
+
+DMTP 在 T2～T7 也保持了更高的累计接受率：首位更可靠，加上 MTP 隐藏状态辅助后续并行预测，共同改善了整个候选块的接受表现。
 
 <details>
 <summary>条件接受率：已经接受前k−1个候选后，第k个继续接受的比例</summary>
@@ -354,9 +356,25 @@ OpenPerfectBlend 侧重数学与代码，因此我们除数学、代码任务外
 
 在这组短输出评测中，DMTP 相对 DFlash 的请求级平均接受长度在五个数据集上均有提升：GSM8K 为 **17.50%**，HumanEval 为 **5.78%**，MATH500 为 **16.67%**，Alpaca 与 MT-Bench 分别为 **21.55%** 和 **17.15%**。
 
-将同样的单 anchor 融合接入 DFlash2 后，五个数据集的接受长度进一步提升 **6.54%～21.83%**，说明 DMTP 的收益可以叠加在 DFlash2 的起草优化之上。
+在同为2,000步的实测对照中，将单 anchor 融合接入 DFlash2 后，五个数据集的接受长度提升 **6.54%～21.83%**。表图中的 DMTP(D2) 数值是假设这一相对增益保持不变、乘以24K DFlash2基线得到的估算，并非24K融合模型实测。
 
 表中 **DMTP(D)**、**DMTP(D2)** 分别表示以 DFlash、DFlash2 为起草器的 DMTP。数值为**请求级平均接受长度**，包含目标模型的修正或 bonus token，MT-Bench 按轮计入。DFlash、DFlash2 与 DMTP(D) 使用 24,000 步 checkpoint。DFlash 系列及对应的 DMTP 每轮均提出七个候选，原生 MTP415 为四个。
+
+### 首候选 T1 接受率
+
+下表比较同为 **24,000步**的 DFlash 与 DMTP(DFLASH)，使用上面的非思考模式和相同五组输入。统计对象是**每个验证轮次的首候选**，不是每条请求开头的第一个输出 token，也不是任务正确率。
+
+<table>
+<thead><tr><th class="first-token-dataset" scope="col">数据集</th><th scope="col">DFlash</th><th scope="col">DMTP(DFLASH)</th><th scope="col">差距（百分点）</th></tr></thead>
+<tbody><tr><th scope="row">GSM8K</th><td>79.74%</td><td><strong>93.83%</strong></td><td><strong>+14.08</strong></td></tr>
+<tr><th scope="row">HumanEval</th><td>90.47%</td><td><strong>96.26%</strong></td><td><strong>+5.79</strong></td></tr>
+<tr><th scope="row">MATH500</th><td>81.58%</td><td><strong>94.80%</strong></td><td><strong>+13.21</strong></td></tr>
+<tr><th scope="row">Alpaca</th><td>66.86%</td><td><strong>83.45%</strong></td><td><strong>+16.59</strong></td></tr>
+<tr><th scope="row">MT-Bench</th><td>67.27%</td><td><strong>83.23%</strong></td><td><strong>+15.96</strong></td></tr></tbody>
+</table>
+
+
+首位接受率按验证轮次汇总：`1 − histogram[0] / Σhistogram[k]`，其中 `histogram[0]` 是零个起草候选被接受的轮数，不计 Target 的修正或 bonus token。差距使用百分点，并由未舍入值计算。
 
 ## 9. 后续方向
 

@@ -25,7 +25,7 @@
 </blockquote>
 <h2 id="zh-section-0">核心观察</h2>
 <ul>
-<li><strong>原生 MTP 的首位优势值得复用。</strong> 在相同目标模型和输入下，我们观察到 MTP 的首 token 接受率高于 DFlash。因此，我们让 MTP 生成首个候选，再由 DFlash 并行预测后六个候选。</li>
+<li><strong>复用 MTP 的预训练首位能力。</strong> 我们让 MTP 生成首个候选，再由 DFlash 并行预测后六个候选。在六类任务上，DMTP 相对 DFlash 的首 token 接受率提高 <strong>5.43～12.46 个百分点</strong>，相对提升 <strong>7.23%～21.00%</strong>。</li>
 <li><strong>通过隐藏状态，把 MTP 的预训练能力带给 DFlash。</strong> 我们不只让 MTP 生成首个候选，还把预测它时的隐藏状态与候选的词嵌入融合。这样，DFlash 在续写时既能看到具体的候选，也能利用 MTP 在预训练中学到的特征，帮助后续 token 的并行预测。</li>
 <li><strong>收益同时覆盖长文与短文任务。</strong> 长文任务中，在 Qwen3.6-35B-A3B 上，DMTP 相对 DFlash 的接受长度提高 <strong>9.25%～19.56%</strong>，B32 端到端吞吐提高 <strong>17.10%～23.75%</strong>。短文任务中，基于公开 Qwen3.6-27B 与 OpenPerfectBlend，DMTP（DFLASH）相对 DFlash 的接受长度提高 <strong>5.78%～21.55%</strong>，DMTP（DFlash2）相对 DFlash2 提高 <strong>6.54%～21.83%</strong>，覆盖数学、代码与聊天任务。</li>
 <li><strong>与 MTP、DFlash 的优化正交。</strong> DMTP 改进的是两者的协作方式；更强的预测器、训练方法、候选选择策略和推理 kernel，都可以继续结合到这一框架中。</li>
@@ -345,7 +345,8 @@ Target：验证七个候选，提交接受前缀与修正/bonus
 <p>图 6 展示 T1～T7 的累计接受率。</p>
 <figure><a href="main-position-acceptance.png" target="_blank" rel="noopener" title="查看原图"><img loading="lazy" src="main-position-acceptance.png" alt="六类负载中主方法T1融合与DFlash的逐位置累计接受率"></a></figure>
 <p><em>图 6：逐位置累计接受率 P(L≥k)，即每轮验证中前 k 个 draft 候选全部接受的比例，不包含修正/bonus。评测设置同上。</em></p>
-<p>DMTP 在六类任务的 T1～T7 位置均获得了更高的累计接受率，表明首位增强与后续并行预测可以共同提升整个候选块的接受表现。</p>
+<p><strong>首 token 接受率相对 DFlash 提高了 5.43～12.46 个百分点，相对提升 7.23%～21.00%。</strong> 其中，Code 从 71.00% 提高到 81.81%，Math 从 73.73% 提高到 83.72%，SWE 从 59.33% 提高到 71.79%。这体现了 DMTP 对原生 MTP 预训练首位预测能力的复用，而不是让 DFlash 从头学习这项能力。</p>
+<p>DMTP 在 T2～T7 也保持了更高的累计接受率：首位更可靠，加上 MTP 隐藏状态辅助后续并行预测，共同改善了整个候选块的接受表现。</p>
 <details>
 <summary>条件接受率：已经接受前k−1个候选后，第k个继续接受的比例</summary>
 
@@ -583,8 +584,21 @@ Target：验证七个候选，提交接受前缀与修正/bonus
 <figure><a href="open27b-acceptance.png" target="_blank" rel="noopener" title="查看原图"><img loading="lazy" src="open27b-acceptance.png" alt="Qwen3.6-27B 开源短文评测中五种方法的请求级平均接受长度"></a></figure>
 <p><em>图 8：五个公开数据集上的请求级平均接受长度。DMTP(D)、DMTP(D2) 分别采用 DFlash、DFlash2 起草器；柱顶标注两组 DMTP 的数值。</em></p>
 <p>在这组短输出评测中，DMTP 相对 DFlash 的请求级平均接受长度在五个数据集上均有提升：GSM8K 为 <strong>17.50%</strong>，HumanEval 为 <strong>5.78%</strong>，MATH500 为 <strong>16.67%</strong>，Alpaca 与 MT-Bench 分别为 <strong>21.55%</strong> 和 <strong>17.15%</strong>。</p>
-<p>将同样的单 anchor 融合接入 DFlash2 后，五个数据集的接受长度进一步提升 <strong>6.54%～21.83%</strong>，说明 DMTP 的收益可以叠加在 DFlash2 的起草优化之上。</p>
+<p>在同为2,000步的实测对照中，将单 anchor 融合接入 DFlash2 后，五个数据集的接受长度提升 <strong>6.54%～21.83%</strong>。表图中的 DMTP(D2) 数值是假设这一相对增益保持不变、乘以24K DFlash2基线得到的估算，并非24K融合模型实测。</p>
 <p>表中 <strong>DMTP(D)</strong>、<strong>DMTP(D2)</strong> 分别表示以 DFlash、DFlash2 为起草器的 DMTP。数值为<strong>请求级平均接受长度</strong>，包含目标模型的修正或 bonus token，MT-Bench 按轮计入。DFlash、DFlash2 与 DMTP(D) 使用 24,000 步 checkpoint。DFlash 系列及对应的 DMTP 每轮均提出七个候选，原生 MTP415 为四个。</p>
+<h3>首候选 T1 接受率</h3>
+<p>下表比较同为 <strong>24,000步</strong>的 DFlash 与 DMTP(DFLASH)，使用上面的非思考模式和相同五组输入。统计对象是<strong>每个验证轮次的首候选</strong>，不是每条请求开头的第一个输出 token，也不是任务正确率。</p>
+<div class="table-scroll" tabindex="0"><table>
+<thead><tr><th class="first-token-dataset" scope="col">数据集</th><th scope="col">DFlash</th><th scope="col">DMTP(DFLASH)</th><th scope="col">差距（百分点）</th></tr></thead>
+<tbody><tr><th scope="row">GSM8K</th><td>79.74%</td><td><strong>93.83%</strong></td><td><strong>+14.08</strong></td></tr>
+<tr><th scope="row">HumanEval</th><td>90.47%</td><td><strong>96.26%</strong></td><td><strong>+5.79</strong></td></tr>
+<tr><th scope="row">MATH500</th><td>81.58%</td><td><strong>94.80%</strong></td><td><strong>+13.21</strong></td></tr>
+<tr><th scope="row">Alpaca</th><td>66.86%</td><td><strong>83.45%</strong></td><td><strong>+16.59</strong></td></tr>
+<tr><th scope="row">MT-Bench</th><td>67.27%</td><td><strong>83.23%</strong></td><td><strong>+15.96</strong></td></tr></tbody>
+</table></div>
+
+
+<p>首位接受率按验证轮次汇总：<code>1 − histogram[0] / Σhistogram[k]</code>，其中 <code>histogram[0]</code> 是零个起草候选被接受的轮数，不计 Target 的修正或 bonus token。差距使用百分点，并由未舍入值计算。</p>
 <h2 id="zh-section-9">9. 后续方向</h2>
 <p><strong>DMTP 的一个局限，是它依赖原生 MTP 的首位预测能力。</strong> 如果 MTP 在某些场景下训练不够充分，它的首 token 接受率可能低于经过任务数据微调的 DFlash。这时，直接把首位交给 MTP 未必是更好的选择。我们还需要进一步探索这种差异，以及如何通过训练和两者的协作改善这些场景。</p>
 <p>我们还想继续探索几个方向：</p>
@@ -635,7 +649,7 @@ Target：验证七个候选，提交接受前缀与修正/bonus
 </blockquote>
 <h2 id="en-section-0">The Key Observations</h2>
 <ul>
-<li><strong>Native MTP&#39;s first-token advantage is worth reusing.</strong> With the same Target and inputs, we observe higher first-token acceptance from MTP than DFlash. We therefore use MTP for T1 and DFlash for the remaining six parallel proposals.</li>
+<li><strong>Reuse MTP&#39;s pretrained first-token capability.</strong> We use MTP for the first candidate and DFlash for the next six parallel proposals. Across six workloads, DMTP improves first-token acceptance over DFlash by <strong>5.43–12.46 percentage points</strong>, or <strong>7.23%–21.00% relatively</strong>.</li>
 <li><strong>Pass MTP&#39;s pretrained capability to DFlash through hidden states.</strong> We use MTP not only to generate T1, but also to fuse the hidden state that predicted it with its token embedding. DFlash can then use both the concrete candidate and features learned during MTP pretraining to predict the continuation in parallel.</li>
 <li><strong>The gains extend across long- and short-text tasks.</strong> On long-text tasks with Qwen3.6-35B-A3B, DMTP improves acceptance length by <strong>9.25%–19.56%</strong> and B32 end-to-end throughput by <strong>17.10%–23.75%</strong>, relative to DFlash. On short-text tasks using public Qwen3.6-27B weights and OpenPerfectBlend, DMTP(DFLASH) improves acceptance length by <strong>5.78%–21.55%</strong> over DFlash, while DMTP(DFlash2) improves it by <strong>6.54%–21.83%</strong> over DFlash2, covering math, code, and chat.</li>
 <li><strong>DMTP complements optimizations within MTP and DFlash.</strong> We change how the two models cooperate; stronger predictors, training methods, candidate-selection strategies, and inference kernels can all be combined with this framework.</li>
@@ -955,7 +969,8 @@ Target:  verify seven candidates and commit the accepted prefix plus correction/
 <p>Figure 6 shows cumulative acceptance from T1 through T7.</p>
 <figure><a href="main-position-acceptance.png" target="_blank" rel="noopener" title="View full-size figure"><img loading="lazy" src="main-position-acceptance.png" alt="Position-wise cumulative acceptance for DFlash and main-method T1-fusion DMTP"></a></figure>
 <p><em>Figure 6. Cumulative acceptance P(L≥k): the fraction of verification rounds accepting the first k draft candidates, excluding correction/bonus tokens. Evaluation settings are unchanged.</em></p>
-<p>DMTP achieves higher cumulative acceptance at every position from T1 to T7 across all six workloads, showing how a stronger first proposal and conditioned parallel prediction improve acceptance throughout the candidate block.</p>
+<p><strong>First-token acceptance improves by 5.43–12.46 percentage points over DFlash, a relative gain of 7.23%–21.00%.</strong> Code increases from 71.00% to 81.81%, Math from 73.73% to 83.72%, and SWE from 59.33% to 71.79%. These gains reflect DMTP&#39;s reuse of native MTP&#39;s pretrained first-token prediction rather than relearning that capability in DFlash.</p>
+<p>DMTP also maintains higher cumulative acceptance at T2–T7: a more reliable first proposal, together with MTP hidden states conditioning parallel continuation, improves acceptance throughout the candidate block.</p>
 <details>
 <summary>Conditional acceptance: accepting candidate k given that the first k−1 were accepted</summary>
 
@@ -1193,8 +1208,21 @@ Target:  verify seven candidates and commit the accepted prefix plus correction/
 <figure><a href="open27b-acceptance.png" target="_blank" rel="noopener" title="View full-size figure"><img loading="lazy" src="open27b-acceptance.png" alt="Per-request mean acceptance length of five methods on public Qwen3.6-27B short-text benchmarks"></a></figure>
 <p><em>Figure 8. Per-request mean acceptance length across five public datasets. DMTP(D) and DMTP(D2) use DFlash and DFlash2 drafts, respectively. Labels show the two DMTP variants&#39; values.</em></p>
 <p>DMTP improves per-request mean acceptance length over DFlash on all five short-output benchmarks: <strong>17.50%</strong> on GSM8K, <strong>5.78%</strong> on HumanEval, <strong>16.67%</strong> on MATH500, <strong>21.55%</strong> on Alpaca, and <strong>17.15%</strong> on MT-Bench.</p>
-<p>Adding the same single-anchor fusion to DFlash2 improves acceptance length by <strong>6.54%–21.83%</strong> across all five datasets, showing that DMTP&#39;s gains also build on DFlash2&#39;s drafting optimizations.</p>
+<p>At 2,000 training steps for both models, single-anchor fusion improves acceptance length over DFlash2 by <strong>6.54%–21.83%</strong> across the five datasets. The DMTP(D2) values in the table and figure extrapolate these gains onto the 24K DFlash2 baseline, assuming unchanged relative gains. They are not measured 24K fusion results.</p>
 <p><strong>DMTP(D)</strong> and <strong>DMTP(D2)</strong> denote DMTP with DFlash and DFlash2 drafts, respectively. We report <strong>per-request mean acceptance length</strong>, including the target correction or bonus token, with MT-Bench counted per turn. DFlash, DFlash2, and DMTP(D) use 24,000-step checkpoints. Both DFlash variants and their DMTP counterparts propose seven candidates per round; native MTP415 proposes four.</p>
+<h3>First-Candidate T1 Acceptance</h3>
+<p>We compare DFlash and DMTP(DFLASH) at <strong>24,000 training steps</strong>, using the non-thinking settings and five input sets above. This measures the first draft candidate in each verification round, not the first output token of each request or task accuracy.</p>
+<div class="table-scroll" tabindex="0"><table>
+<thead><tr><th class="first-token-dataset" scope="col">Dataset</th><th scope="col">DFlash</th><th scope="col">DMTP(DFLASH)</th><th scope="col">Difference (pp)</th></tr></thead>
+<tbody><tr><th scope="row">GSM8K</th><td>79.74%</td><td><strong>93.83%</strong></td><td><strong>+14.08</strong></td></tr>
+<tr><th scope="row">HumanEval</th><td>90.47%</td><td><strong>96.26%</strong></td><td><strong>+5.79</strong></td></tr>
+<tr><th scope="row">MATH500</th><td>81.58%</td><td><strong>94.80%</strong></td><td><strong>+13.21</strong></td></tr>
+<tr><th scope="row">Alpaca</th><td>66.86%</td><td><strong>83.45%</strong></td><td><strong>+16.59</strong></td></tr>
+<tr><th scope="row">MT-Bench</th><td>67.27%</td><td><strong>83.23%</strong></td><td><strong>+15.96</strong></td></tr></tbody>
+</table></div>
+
+
+<p>First-candidate acceptance is aggregated over verification rounds: <code>1 − histogram[0] / Σhistogram[k]</code>. Here <code>histogram[0]</code> counts rounds accepting no draft candidates. Target correction or bonus tokens are excluded. Differences are in percentage points, computed before rounding.</p>
 <h2 id="en-section-9">9. Future Directions</h2>
 <p><strong>One limitation of DMTP is its reliance on native MTP&#39;s first-token prediction.</strong> When MTP is insufficiently trained for a particular setting, its first-token acceptance can be lower than that of a DFlash model fine-tuned on relevant task data. Delegating the first token to MTP may then be the weaker choice. We want to better understand this gap and explore how training and cooperation between the two models can improve those settings.</p>
 <p>Beyond the current target-only verifier, we plan to explore <strong>rejection sampling and block verify</strong>, evaluating acceptance length, sampling consistency, and end-to-end throughput.</p>
