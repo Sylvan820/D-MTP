@@ -344,20 +344,22 @@ DMTP 在六类任务的 T1～T7 位置均获得了更高的累计接受率，表
 
 GSM8K、HumanEval、Alpaca 与 MATH500 使用单轮输入。MT-Bench 使用 80 个双轮会话，共 160 次生成，第二轮保留各模型自身的第一轮回答。两组均使用 FlashAttention-3、CUDA Graph、贪心起草和 target-only 前缀验证。
 
+我们将 Alpaca 与 MT-Bench 作为这组 OpenPerfectBlend 训练的**分布外（OOD）聊天评测**，检验模型在聊天任务上的泛化能力。
+
 <table>
 <colgroup><col style="width:14%"><col style="width:12%"><col style="width:12%"><col style="width:12%"><col style="width:12%"><col style="width:19%"><col style="width:19%"></colgroup>
 <thead><tr><th class="acceptance-dataset" rowspan="2" scope="col">数据集</th><th class="acceptance-model" colspan="2" scope="colgroup">原生 MTP415</th><th class="acceptance-model" colspan="2" scope="colgroup">DFlash</th><th class="acceptance-model" colspan="2" scope="colgroup">DMTP(DFLASH)</th></tr><tr><th class="model-start" scope="col">Per-request</th><th scope="col">Per-verify</th><th class="model-start" scope="col">Per-request</th><th scope="col">Per-verify</th><th class="model-start" scope="col">Per-request</th><th scope="col">Per-verify</th></tr></thead>
 <tbody><tr><th scope="row">GSM8K</th><td class="model-start mtp415">4.373</td><td class="mtp415">4.334</td><td class="model-start dflash">4.318</td><td class="dflash">4.234</td><td class="model-start dmtp"><strong>5.074</strong> <strong class="acceptance-gain">(+17.50%)</strong></td><td class="dmtp"><strong>4.897</strong> <strong class="acceptance-gain">(+15.65%)</strong></td></tr>
 <tr><th scope="row">HumanEval</th><td class="model-start mtp415">4.698</td><td class="mtp415">4.623</td><td class="model-start dflash">6.424</td><td class="dflash">5.804</td><td class="model-start dmtp"><strong>6.795</strong> <strong class="acceptance-gain">(+5.78%)</strong></td><td class="dmtp"><strong>6.245</strong> <strong class="acceptance-gain">(+7.60%)</strong></td></tr>
-<tr><th scope="row">Alpaca</th><td class="model-start mtp415"><strong>3.529</strong></td><td class="mtp415"><strong>3.299</strong></td><td class="model-start dflash">2.763</td><td class="dflash">2.524</td><td class="model-start dmtp">3.358 <strong class="acceptance-gain">(+21.55%)</strong></td><td class="dmtp">3.066 <strong class="acceptance-gain">(+21.48%)</strong></td></tr>
 <tr><th scope="row">MATH500</th><td class="model-start mtp415">4.377</td><td class="mtp415">4.359</td><td class="model-start dflash">4.258</td><td class="dflash">4.207</td><td class="model-start dmtp"><strong>4.968</strong> <strong class="acceptance-gain">(+16.67%)</strong></td><td class="dmtp"><strong>4.918</strong> <strong class="acceptance-gain">(+16.90%)</strong></td></tr>
+<tr><th scope="row">Alpaca</th><td class="model-start mtp415"><strong>3.529</strong></td><td class="mtp415"><strong>3.299</strong></td><td class="model-start dflash">2.763</td><td class="dflash">2.524</td><td class="model-start dmtp">3.358 <strong class="acceptance-gain">(+21.55%)</strong></td><td class="dmtp">3.066 <strong class="acceptance-gain">(+21.48%)</strong></td></tr>
 <tr><th scope="row">MT-Bench</th><td class="model-start mtp415">3.599</td><td class="mtp415"><strong>3.392</strong></td><td class="model-start dflash">3.209</td><td class="dflash">2.708</td><td class="model-start dmtp"><strong>3.760</strong> <strong class="acceptance-gain">(+17.15%)</strong></td><td class="dmtp">3.246 <strong class="acceptance-gain">(+19.87%)</strong></td></tr></tbody>
 </table>
 
 
 表中同时报告两种平均接受长度，均包含目标模型的修正或 bonus token。**Per-request** 对每次生成的平均接受长度等权平均；**Per-verify** 按实际验证轮次汇总：`1 + Σ(k × histogram[k]) / Σhistogram[k]`。MT-Bench 的两个轮次分别作为生成请求计入。
 
-DMTP 数值后的红色括号表示相对 DFlash 同口径接受长度的提升，按未舍入数值计算。
+<strong class="acceptance-comparison">DMTP 相对 DFlash 的提升</strong>以红色括号标在 DMTP 数值后，按同一统计口径的未舍入数值计算。
 
 原生 MTP415 使用同一公开 Qwen3.6-27B 及其内置 MTP 权重，沿用上述输入与采样设置。415 表示四步起草、top-k 为 1、五个验证槽位，共提出四个候选，关闭 overlap 调度。其接受长度上限为 5；DFlash 与 DMTP 提出七个候选，上限为 8。因此，原生 MTP 一列作为参考，不是等候选预算消融。
 
