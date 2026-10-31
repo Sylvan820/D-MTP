@@ -1,6 +1,4 @@
-# D-MTP
-
-DMTP: A Better First Token for Block Drafting via MTP.
+# DMTP: A Better First Token for Block Drafting via MTP
 
 Author: Piggy Shen.
 

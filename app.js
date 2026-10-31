@@ -12,6 +12,7 @@
     const fraction=Math.max(0,scrollY-old.offsetTop)/Math.max(1,old.offsetHeight-innerHeight);
     language=next;
     document.documentElement.lang=next==='zh'?'zh-CN':'en';
+    document.title=document.querySelector(`#article-${next} h1`).textContent;
     document.querySelectorAll('[data-lang]').forEach(e=>e.hidden=e.dataset.lang!==next);
     document.querySelectorAll('article').forEach(e=>e.hidden=e.id!==`article-${next}`);
     document.querySelectorAll('[data-download]').forEach(e=>e.hidden=e.dataset.download!==next);

@@ -148,6 +148,8 @@ MTP 仍然消费 A，产生 T1 及预测它的 hidden；DFlash 只接收融合�
 
 我们使用 Qwen3.6-35B-A3B，训练长度为 32K，数据规模约 25 万条，大部分来自 Agent 和 Long-horizon 场景。MT-Bench 属于训练分布之外的 OOD 评测，用于观察模型的跨场景泛化表现。
 
+DFlash 与 DMTP 使用相同的训练数据、训练超参数和训练预算。DMTP 在此基础上接入原生 MTP 的首词元预测及其 hidden，并训练 T1 融合模块。
+
 训练分为三步：
 
 1. **提取冻结特征。** Target 处理训练序列；在每个 block 边界，MTP 读取 A 与上一位置的 Target hidden，得到预测 T1 的表示。DFlash context 只使用 A 之前的 Target 特征。

@@ -149,6 +149,8 @@ We also tried repurposing MTP layers for DFlash-style parallel prediction, but s
 
 We use Qwen3.6-35B-A3B with 32K training contexts and approximately 250K records, predominantly from Agent and Long-horizon scenarios. We use MT-Bench as an out-of-distribution (OOD) evaluation to examine generalization beyond the training distribution.
 
+We train DFlash and DMTP with the same data, training hyperparameters, and training budget. DMTP adds native MTP's first-token prediction and its predicting hidden state, together with a trainable T1 fusion module.
+
 Training follows three steps:
 
 1. **Extract frozen features.** Target processes the training sequence. At each block boundary, MTP consumes A and the preceding target hidden to obtain the representation for predicting T1. DFlash context uses only target features before A.

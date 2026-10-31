@@ -168,6 +168,7 @@ Target：验证七个候选，提交接受前缀与修正/bonus
 <p>我们也尝试过将 MTP layer 直接用于 DFlash 式并行预测，但观察到首位表现受到影响，收敛收益也有限。这让我们选择先冻结预训练 MTP，把它的首位能力保留下来，再围绕 T1 训练并行续写。</p>
 <h2 id="zh-section-4">4. DMTP 训练流程</h2>
 <p>我们使用 Qwen3.6-35B-A3B，训练长度为 32K，数据规模约 25 万条，大部分来自 Agent 和 Long-horizon 场景。MT-Bench 属于训练分布之外的 OOD 评测，用于观察模型的跨场景泛化表现。</p>
+<p>DFlash 与 DMTP 使用相同的训练数据、训练超参数和训练预算。DMTP 在此基础上接入原生 MTP 的首词元预测及其 hidden，并训练 T1 融合模块。</p>
 <p>训练分为三步：</p>
 <ol>
 <li><strong>提取冻结特征。</strong> Target 处理训练序列；在每个 block 边界，MTP 读取 A 与上一位置的 Target hidden，得到预测 T1 的表示。DFlash context 只使用 A 之前的 Target 特征。</li>
@@ -747,6 +748,7 @@ Target:  verify seven candidates and commit the accepted prefix plus correction/
 <p>We also tried repurposing MTP layers for DFlash-style parallel prediction, but saw first-position performance affected and limited convergence gains. We therefore chose to freeze pretrained MTP and train parallel continuation around its T1 proposal.</p>
 <h2 id="en-section-4">4. Training DMTP</h2>
 <p>We use Qwen3.6-35B-A3B with 32K training contexts and approximately 250K records, predominantly from Agent and Long-horizon scenarios. We use MT-Bench as an out-of-distribution (OOD) evaluation to examine generalization beyond the training distribution.</p>
+<p>We train DFlash and DMTP with the same data, training hyperparameters, and training budget. DMTP adds native MTP&#39;s first-token prediction and its predicting hidden state, together with a trainable T1 fusion module.</p>
 <p>Training follows three steps:</p>
 <ol>
 <li><strong>Extract frozen features.</strong> Target processes the training sequence. At each block boundary, MTP consumes A and the preceding target hidden to obtain the representation for predicting T1. DFlash context uses only target features before A.</li>
