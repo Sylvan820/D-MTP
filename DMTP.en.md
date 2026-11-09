@@ -2,13 +2,21 @@
 
 **Piggy Shen · October 2026 · Technical Blog**
 
+> **Update · November 9, 2026**
+>
+> We find that **zero-initialized residual injection performs comparably to direct fusion and is better suited to continued fine-tuning from existing DFlash weights**. We therefore adopt **two anchors with a zero-initialized residual at the first candidate's embedding slot**, retaining the original embedding while learning to incorporate MTP's predictive features.
+
+> **Update · November 4, 2026**
+>
+> We find that single- and dual-anchor layouts perform similarly when trained from scratch, but **the dual-anchor layout performs better when fine-tuning from existing DFlash weights**. It also achieves **higher end-to-end throughput at comparable acceptance lengths**. We will therefore adopt the dual-anchor layout for subsequent DMTP models and continue sharing updated results. The experimental results reported here remain unchanged.
+
 Speculative decoding is an important component of LLM inference infrastructure. [DFlash](https://z-lab.ai/projects/dflash/) demonstrates the potential of parallel candidate prediction, while DeepSeek has deployed [DSpark](https://arxiv.org/abs/2607.05147) in production and reported gains over MTP. Yet DFlash does not consistently outperform MTP on models with well-trained native MTP modules, such as GLM and Qwen, or on some conversation workloads. We focus on reusing MTP's first-token prediction capability.
 
 Our evaluations and discussions with [Domino](https://arxiv.org/abs/2605.29707) author Jianuo Huang highlight complementary strengths: native MTP has higher first-token acceptance, particularly on workloads outside the training distribution, while DFlash generates a longer continuation in parallel. This motivates combining pretrained first-token prediction with parallel drafting.
 
 Several approaches address the decline in acceptance at later positions within a DFlash-style block. **We focus on a different question: can we improve the first draft token itself?** Under prefix verification, rejecting that first candidate prevents the rest of the block from being committed. DMTP starts with a pretrained MTP prediction, then passes its hidden representation to DFlash for the continuation.
 
-We introduce **DMTP**: pretrained MTP proposes the first candidate token in each drafting round (**T1**), and DFlash predicts the remaining six candidates (**T2–T7**) in parallel. Our main method is **MTP-style token and hidden-state fusion**: independently normalize the first candidate's embedding and the MTP hidden state that predicted it, concatenate them, and project the pair into that candidate's input position.
+We introduce **DMTP**: pretrained MTP proposes the first candidate token in each drafting round (**T1**), and DFlash predicts the remaining six candidates (**T2–T7**) in parallel. Our main method uses **two anchors and a zero-initialized residual**: retain the emitted token A and first candidate T1, normalize and concatenate T1's embedding with the MTP hidden state that predicted it, and project the pair into a residual added only to T1's embedding.
 
 > **The key idea:** let MTP start the block and DFlash continue it in parallel. The two models share both a concrete candidate and a predictive representation, while retaining their original backbones.
 
@@ -44,9 +52,9 @@ DFlash:  condition on T1 and propose T2–T7 in one forward pass
 Target:  verify seven candidates and commit the accepted prefix plus correction/bonus
 ```
 
-![MTP-style token and hidden-state fusion at the first candidate input position](architecture.png)
+![Dual-anchor DMTP with a zero-initialized residual added only to the T1 embedding](dual-anchor-residual.svg)
 
-*Figure 2. Original DFlash (top) and DMTP (bottom). DMTP fuses the MTP hidden that predicts T1 with its token embedding, then predicts T2–T7 in parallel. The original target-context-to-KV path is retained; the T1 embedding comes from a token lookup.*
+*Figure 2. MTP proposes T1 and provides the hidden state that predicted it. We retain A and add a residual only to T1's embedding; DFlash predicts the next six candidates in parallel. A and MASK slots receive no direct residual, and the target-context pathway stays unchanged.*
 
 We chose this division of labor for three reasons.
 
@@ -62,37 +70,35 @@ We use MTP only for T1 to control serial drafting cost. Additional MTP candidate
 
 ## 3. MTP Hidden-State Integration and Ablations
 
-We use **MTP-style token and hidden-state fusion** and compare alternative representation interfaces through ablations.
+We use **two anchors with a zero-initialized residual at T1's embedding slot**, incorporating MTP features while preserving the original token embedding.
 
-We refer to the target model as Target and the proposing model as Draft. Let \(A = x_a\) be the token already emitted by Target but not yet processed by it (the pending token). Available target-context features end at \(x_{a-1}\). Native MTP reads \(A\) and the preceding target hidden state to predict the first candidate, \(T_1 = x_{a+1}\). No target hidden state for \(A\) or \(T_1\) is required.
-
-Fusion reads **the MTP hidden that predicted T1**, not one computed after consuming T1:
+Let \(A = x_a\) be the token already emitted by Target but not yet processed by it. Available target-context features end at \(x_{a-1}\). MTP reads A and the preceding target hidden state to propose \(T_1 = x_{a+1}\). We use **the MTP hidden state that predicts T1**, not one obtained after consuming T1.
 
 $$
-\widetilde{\mathbf e}_{T_1}=W_f\left[\operatorname{RMS}_e(\mathbf e_{T_1});\operatorname{RMS}_m(\mathbf h_{\mathrm{MTP}})\right].
+\Delta = W\left[\operatorname{RMS}_e(\mathbf e_{T_1});\operatorname{RMS}_m(\operatorname{stopgrad}(\mathbf h_{\mathrm{MTP}}))\right],\qquad W_{\mathrm{init}}=0.
 $$
 
-Each 2048-dimensional input has its own learned RMSNorm, followed by a 4096→2048 linear projection. The input is `[T1,MASK×6]`, where MASK marks a position to predict. Only the first candidate's embedding is replaced. The six mask embeddings, original prediction head, and target-context projection and key/value cache (KV) path stay unchanged; MTP's KV is not concatenated into DFlash context.
+$$
+\widetilde{\mathbf e}_{T_1}=\mathbf e_{T_1}+\Delta.
+$$
 
-### The MTP-Style Fusion Interface
+DFlash receives:
 
-We follow native MTP's normalization-and-projection pattern, with separately trained fusion parameters. E(T1) identifies the candidate, MTP hidden provides predictive features, and all six MASK queries attend to the fused T1.
+```text
+[E(A), E(T1) + Δ, E(MASK), …, E(MASK)]
+```
 
-The change is confined to T1's input. Historical features, the target-context pathway, the DFlash backbone, and the proposal budget remain unchanged.
+### A Residual at the First Candidate Only
 
-### Single-Anchor Conditioning
+Each feature stream has its own RMSNorm. We concatenate the normalized features and project back to the embedding dimension. **W is initialized to zero**, so Δ = 0 initially and T1 retains its original E(T1). The residual branch gradually learns to incorporate MTP features during continued fine-tuning.
 
-> **One anchor, seven proposals.** T1 is the only DFlash anchor; DFlash predicts T2–T7 in parallel. T1 can still be rejected. The seven proposals are T1–T7.
+**Neither A nor the six MASK slots receive a direct residual, and no extra hidden-state slot is inserted.** Later positions attend to the enhanced T1 and are influenced indirectly. The original target-context projection and key/value cache pathway remain unchanged; MTP KV is not appended.
 
-MTP still consumes A and produces T1 and its predicting hidden state; DFlash receives only the fused T1 and six MASKs. Target context ends before A, with no additional Target forward required.
+### Two Anchors and Training Boundaries
 
-**Two anchors means retaining both the original anchor A and the MTP proposal T1 before the MASK positions.** The input is `[A,T1,MASK×6]`, rather than the single-anchor `[T1,MASK×6]`. The extra E(A) lets MASK queries directly access the original anchor's token embedding through attention. A has already been emitted and is not a new proposal.
+We retain both A and T1 before the MASK positions, giving eight input slots. A has already been emitted and is not a new proposal. Each round still proposes seven candidates: T1 from MTP and T2–T7 from DFlash in parallel.
 
-We choose the single-anchor layout for similar performance with fewer changes: replace the original anchor with T1 and retain the anchor-plus-MASK structure. MASK embeddings, parallel prediction, and the original output head stay unchanged, making continued fine-tuning of an existing DFlash straightforward.
-
-![T1 as the only anchor, followed by six supervised MASK positions](anchor-layout.png)
-
-*Figure 3a. Seven input slots, seven proposals: T1 comes from MTP and T2–T7 come from DFlash. The known T1 slot receives no draft prediction loss.*
+**MTP is frozen and its hidden state is detached; we train DFlash, the selector, and the residual fusion layer.** T1 is a known input, while the six MASK positions predict the continuation.
 
 ### Ablation Design
 

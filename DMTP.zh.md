@@ -2,13 +2,21 @@
 
 **Piggy Shen · 2026 年 10 月 · 技术博客**
 
+> **Update · 2026 年 11 月 9 日**
+>
+> 我们发现，**零初始化残差与直接融合的效果接近，但更适合从已有 DFlash 权重微调续训**。因此，我们将主方法更新为**双 anchor + 首候选 embedding 槽位的零初始化残差**，保留原始词嵌入，再逐步引入 MTP 的预测特征。
+
+> **Update · 2026 年 11 月 4 日**
+>
+> 我们发现，双 anchor 与单 anchor 从头训练时效果接近；但**从已有 DFlash 权重微调续训时，双 anchor 的效果更好**。此外，**在接受长度接近的情况下，双 anchor 的端到端吞吐更高**。因此，后续 DMTP 将采用双 anchor 形式，我们也会继续更新实验结果。本文已有实验数据保持不变。
+
 投机解码已成为大模型推理基础设施的重要组成部分。[DFlash](https://z-lab.ai/projects/dflash/) 展示了并行预测多个候选的潜力，DeepSeek 也在生产服务中采用 [DSpark](https://arxiv.org/abs/2607.05147)，并报告了相对 MTP 的收益。然而，在 GLM、Qwen 等原生 MTP 训练充分的模型及部分对话场景中，DFlash 相比 MTP 并不总有显著优势。我们关注的是如何复用 MTP 的首 token 预测能力。
 
 我们的评测以及与 [Domino](https://arxiv.org/abs/2605.29707) 作者 Jianuo Huang 的讨论，揭示了两者的互补性：原生 MTP 的首 token 接受率更高，在训练分布之外的场景下尤其明显；DFlash 则能并行生成更长的续写。这为结合预训练首位能力与并行预测提供了直接动机。
 
 针对 DFlash 类模型在候选块内后续位置接受率逐渐衰减的问题，已有多种改进方案。**我们关注的是另一个问题：能不能先把第一个候选 token 的接受率提上去？** 验证按连续前缀接受：首位被拒绝，后面的候选就无法在本轮提交。DMTP 从预训练 MTP 的首位预测出发，再把预测它时的隐藏状态传给 DFlash，帮助后续并行续写。
 
-我们提出 **DMTP**：由预训练 MTP 生成每轮起草的第一个候选 token（记为 **T1**），再由 DFlash 并行生成后六个候选（**T2～T7**）。本文选择 **MTP 式词元与隐藏状态融合**作为主方法，将预测首个候选时的 MTP 隐藏状态与该候选的词嵌入分别归一化、拼接投影，作为其输入表示。
+我们提出 **DMTP**：由预训练 MTP 生成每轮起草的第一个候选 token（记为 **T1**），再由 DFlash 并行生成后六个候选（**T2～T7**）。主方法采用**双 anchor 与零初始化残差**：保留已输出的 A 和首候选 T1，将 T1 词嵌入与预测它时的 MTP 隐藏状态归一化、拼接投影，得到仅加在 T1 词嵌入上的残差。
 
 > **核心思路：** 让 MTP 为生成开个好头，让 DFlash 并行完成续写。两者既共享候选 token，也通过预测表示建立联系，而不必替换各自的主干。
 
@@ -43,9 +51,9 @@ DFlash：以 T1 为条件，一次生成 T2～T7
 Target：验证七个候选，提交接受前缀与修正/bonus
 ```
 
-![MTP式词元与隐藏状态融合：预测T1的隐藏状态与T1词嵌入归一化拼接，融合后的T1输入DFlash](architecture.png)
+![双 anchor DMTP：只在 T1 的词嵌入槽位加入零初始化残差](dual-anchor-residual.svg)
 
-*图 2：原版 DFlash（上）与 DMTP（下）。DMTP 将预测首个候选时的 MTP 隐藏状态与该候选的词嵌入融合，再并行预测后六个候选。目标模型上下文到键/值缓存（KV）的原有路径保持不变；首个候选的词嵌入来自 token 查表。*
+*图 2：MTP 生成首候选 T1，并提供预测它的隐藏状态。我们保留 A，只在 T1 的词嵌入上加入残差；DFlash 并行预测后六个候选。A 与 MASK 槽位不直接加残差，目标模型上下文路径保持不变。*
 
 我们选择这个分工，主要考虑了三点。
 
@@ -61,37 +69,35 @@ Target：验证七个候选，提交接受前缀与修正/bonus
 
 ## 3. MTP 表示的注入方式
 
-我们采用 **MTP 式词元与隐藏状态融合**，并通过消融比较不同的表示注入方式。
+我们采用**双 anchor + T1 槽位零初始化残差**，将 MTP 的预测特征接入 DFlash，同时保留 T1 原有的词嵌入。
 
-下文将目标模型记为 Target、起草模型记为 Draft。设 \(A = x_a\) 是目标模型已经输出、但尚未处理的 token（pending token）；目标模型已有的上下文特征截止 \(x_{a-1}\)。MTP 读取上一位置的目标模型隐藏状态与 \(A\)，得到用于预测首个候选 \(T_1 = x_{a+1}\) 的表示，不需要目标模型处理 \(A\) 或 \(T_1\) 后的隐藏状态。
-
-融合使用的就是**预测 T1 时的 MTP hidden**，不是消费 T1 之后的下一份 hidden：
+设 \(A = x_a\) 是目标模型已经输出、但尚未处理的 token，已有上下文特征截止 \(x_{a-1}\)。MTP 读取上一位置的目标模型隐藏状态与 A，生成首候选 \(T_1 = x_{a+1}\)。我们使用的是**预测 T1 时的 MTP 隐藏状态**，而不是消费 T1 之后的隐藏状态。
 
 $$
-\widetilde{\mathbf e}_{T_1}=W_f\left[\operatorname{RMS}_e(\mathbf e_{T_1});\operatorname{RMS}_m(\mathbf h_{\mathrm{MTP}})\right].
+\Delta = W\left[\operatorname{RMS}_e(\mathbf e_{T_1});\operatorname{RMS}_m(\operatorname{stopgrad}(\mathbf h_{\mathrm{MTP}}))\right],\qquad W_{\mathrm{init}}=0.
 $$
 
-两路 2048 维特征独立使用可学习 RMSNorm，再经 4096→2048 线性投影。输入采用 `[T1,MASK×6]`，其中 MASK 表示待预测位置的掩码。只用融合结果替换首个候选的词嵌入；六个掩码的词嵌入与原预测头保持不变，目标模型上下文沿用原特征投影与键/值缓存（KV）路径，不向 DFlash 上下文拼入 MTP 的 KV。
+$$
+\widetilde{\mathbf e}_{T_1}=\mathbf e_{T_1}+\Delta.
+$$
 
-### MTP 式融合的设计
+DFlash 的输入为：
 
-我们借鉴原生 MTP 的归一化与拼接投影结构，融合参数单独训练。E(T1) 指定候选 token，MTP hidden 提供预测特征，六个 MASK 通过 attention 读取融合后的 T1。
+```text
+[E(A), E(T1) + Δ, E(MASK), …, E(MASK)]
+```
 
-改动集中在 T1 的输入位置，历史特征、Target context 路径、DFlash 主干和候选预算保持不变。
+### 只在首候选槽位加残差
 
-### 单 Anchor 条件输入
+两路特征分别经过 RMSNorm，再拼接并投影回词嵌入维度。**投影权重 W 初始化为零**，因此初始化时 Δ = 0，T1 槽位仍是原来的 E(T1)。我们保留这条词嵌入路径，让残差分支在续训中逐步学习 MTP 特征。
 
-> **一个 Anchor，七个候选。** 以 MTP 提出的 T1 为唯一 anchor，DFlash 并行预测 T2～T7。T1 仍可能被拒绝，送去验证的七个候选是 T1～T7。
+**A 和六个 MASK 槽位不直接加残差，也不额外插入 hidden 槽位。** 后续位置通过 attention 读取增强后的 T1，间接受 MTP 表示影响。目标模型上下文沿用原特征投影与键/值缓存路径，不拼入 MTP 的 KV。
 
-MTP 仍然消费 A，产生 T1 及预测它的 hidden；DFlash 只接收融合后的 T1 和六个 MASK。Target context 截止 A 之前，不需要额外执行 Target 前向。
+### 双 Anchor 与训练边界
 
-**双 Anchor 指在 MASK 前同时保留原本的 anchor A 和 MTP 提出的 T1。** 输入为 `[A,T1,MASK×6]`，相比单 anchor 的 `[T1,MASK×6]`，额外提供 E(A)，让后续 MASK 通过 attention 更直接地读取原本 anchor 的词嵌入信息。A 已经输出，不属于本轮新增候选。
+我们在 MASK 前同时保留原 anchor A 和 MTP 首候选 T1，输入共八个槽位。A 已经输出，不属于新增候选；每轮仍由 MTP 提出 T1、DFlash 并行预测 T2～T7，共七个候选。
 
-我们选择效果接近、改动更少的单 Anchor：将原版 anchor 换成 T1，保留单 anchor 加 MASK 的布局。MASK 的 embedding、并行预测与原输出头结构不变，便于从已有 DFlash 继续微调。
-
-![七个输入槽位：T1作为唯一anchor，六个待预测MASK](anchor-layout.png)
-
-*图3a：七个输入槽位、七个候选。T1由MTP生成，T2～T7由DFlash生成。已知T1槽位不计算draft预测loss。*
+**MTP 保持冻结，其隐藏状态 detach；训练 DFlash、selector 和残差融合层。** 首候选作为已知输入，六个 MASK 负责后续位置的预测。
 
 ### 消融设计
 
