@@ -51,7 +51,7 @@
 DFlash：以 T1 为条件，一次生成 T2～T7
 Target：验证七个候选，提交接受前缀与修正/bonus
 </code></pre>
-<figure><a href="dual-anchor-residual.svg" target="_blank" rel="noopener" title="查看原图"><img loading="lazy" src="dual-anchor-residual.svg" alt="双 anchor DMTP：只在 T1 的词嵌入槽位加入零初始化残差"></a></figure>
+<figure><a href="architecture.svg" target="_blank" rel="noopener" title="查看原图"><img loading="lazy" src="architecture.svg" alt="双 anchor DMTP：只在 T1 的词嵌入槽位加入零初始化残差"></a></figure>
 <p><em>图 2：MTP 生成首候选 T1，并提供预测它的隐藏状态。我们保留 A，只在 T1 的词嵌入上加入残差；DFlash 并行预测后六个候选。A 与 MASK 槽位不直接加残差，目标模型上下文路径保持不变。</em></p>
 <p>我们选择这个分工，主要考虑了三点。</p>
 <p><strong>保留首位能力。</strong> 我们冻结原生 MTP，保留其预训练的首位预测，只训练后续的并行 draft。</p>
@@ -681,7 +681,7 @@ Target：验证七个候选，提交接受前缀与修正/bonus
 DFlash:  condition on T1 and propose T2–T7 in one forward pass
 Target:  verify seven candidates and commit the accepted prefix plus correction/bonus
 </code></pre>
-<figure><a href="dual-anchor-residual.svg" target="_blank" rel="noopener" title="View full-size figure"><img loading="lazy" src="dual-anchor-residual.svg" alt="Dual-anchor DMTP with a zero-initialized residual added only to the T1 embedding"></a></figure>
+<figure><a href="architecture.svg" target="_blank" rel="noopener" title="View full-size figure"><img loading="lazy" src="architecture.svg" alt="Dual-anchor DMTP with a zero-initialized residual added only to the T1 embedding"></a></figure>
 <p><em>Figure 2. MTP proposes T1 and provides the hidden state that predicted it. We retain A and add a residual only to T1&#39;s embedding; DFlash predicts the next six candidates in parallel. A and MASK slots receive no direct residual, and the target-context pathway stays unchanged.</em></p>
 <p>We chose this division of labor for three reasons.</p>
 <p><strong>Preserve first-token prediction.</strong> We freeze native MTP to retain its pretrained first-step capability and train the parallel continuation separately.</p>

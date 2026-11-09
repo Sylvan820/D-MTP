@@ -52,7 +52,7 @@ DFlash:  condition on T1 and propose T2–T7 in one forward pass
 Target:  verify seven candidates and commit the accepted prefix plus correction/bonus
 ```
 
-![Dual-anchor DMTP with a zero-initialized residual added only to the T1 embedding](dual-anchor-residual.svg)
+![Dual-anchor DMTP with a zero-initialized residual added only to the T1 embedding](architecture.svg)
 
 *Figure 2. MTP proposes T1 and provides the hidden state that predicted it. We retain A and add a residual only to T1's embedding; DFlash predicts the next six candidates in parallel. A and MASK slots receive no direct residual, and the target-context pathway stays unchanged.*
 

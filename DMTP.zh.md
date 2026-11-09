@@ -51,7 +51,7 @@ DFlash：以 T1 为条件，一次生成 T2～T7
 Target：验证七个候选，提交接受前缀与修正/bonus
 ```
 
-![双 anchor DMTP：只在 T1 的词嵌入槽位加入零初始化残差](dual-anchor-residual.svg)
+![双 anchor DMTP：只在 T1 的词嵌入槽位加入零初始化残差](architecture.svg)
 
 *图 2：MTP 生成首候选 T1，并提供预测它的隐藏状态。我们保留 A，只在 T1 的词嵌入上加入残差；DFlash 并行预测后六个候选。A 与 MASK 槽位不直接加残差，目标模型上下文路径保持不变。*
 
