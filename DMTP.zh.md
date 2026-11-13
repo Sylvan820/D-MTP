@@ -428,7 +428,7 @@ DMTP 仍是一次初步探索。我们将继续分享更多模型与场景下的
 
 ```bibtex
 @misc{shen2026dmtp,
-  author = {Shen, Yuhao},
+  author = {Shen, Yuhao and Huang, Jianuo},
   title  = {{DMTP}: A Better First Token for Block Drafting via MTP},
   year   = {2026},
   note   = {Technical blog}

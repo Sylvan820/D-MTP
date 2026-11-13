@@ -430,7 +430,7 @@ If you find this work useful, please consider citing this technical blog:
 
 ```bibtex
 @misc{shen2026dmtp,
-  author = {Shen, Yuhao},
+  author = {Shen, Yuhao and Huang, Jianuo},
   title  = {{DMTP}: A Better First Token for Block Drafting via MTP},
   year   = {2026},
   note   = {Technical blog}
