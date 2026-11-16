@@ -3,7 +3,7 @@
 **Piggy Shen · October 2026 · Technical Blog**
 
 <div class="release-resources">
-<p class="release-note">Model weights and inference code are open source.</p>
+<p class="release-note">Model weights, SGLang inference code, and SpecForge training code are open source.</p>
 <nav class="resource-links" aria-label="Open-source weights and code">
 <a class="resource-link" href="https://huggingface.co/Piggy12/Qwen3.6-27B-DMTP" target="_blank" rel="noopener noreferrer" title="Qwen3.6-27B DMTP weights on Hugging Face"><img class="resource-icon" src="resource-model.svg" width="18" height="18" alt=""><span>HF · 3.6-27B</span></a>
 <a class="resource-link" href="https://huggingface.co/Piggy12/Qwen3.8-next-120b-dmtp" target="_blank" rel="noopener noreferrer" title="Qwen3.8-Next-120B DMTP weights on Hugging Face"><img class="resource-icon" src="resource-model.svg" width="18" height="18" alt=""><span>HF · 3.8-Next-120B</span></a>

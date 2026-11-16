@@ -3,7 +3,7 @@
 2026 年 11 月 · 技术博客
 
 <div class="release-resources">
-<p class="release-note">权重与推理代码已开源。</p>
+<p class="release-note">权重、SGLang 推理代码以及 SpecForge 训练代码已开源。</p>
 <nav class="resource-links" aria-label="开源权重与代码">
 <a class="resource-link" href="https://huggingface.co/Piggy12/Qwen3.6-27B-DMTP" target="_blank" rel="noopener noreferrer" title="Qwen3.6-27B DMTP weights on Hugging Face"><img class="resource-icon" src="resource-model.svg" width="18" height="18" alt=""><span>HF · 3.6-27B</span></a>
 <a class="resource-link" href="https://huggingface.co/Piggy12/Qwen3.8-next-120b-dmtp" target="_blank" rel="noopener noreferrer" title="Qwen3.8-Next-120B DMTP weights on Hugging Face"><img class="resource-icon" src="resource-model.svg" width="18" height="18" alt=""><span>HF · 3.8-Next-120B</span></a>
