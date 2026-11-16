@@ -1,5 +1,5 @@
 (() => {
-  let language = 'en';
+  let language = new URLSearchParams(location.search).get('lang') === 'zh' ? 'zh' : 'en';
   function refreshProgress() {
     const total = document.documentElement.scrollHeight - innerHeight;
     document.querySelector('.reading-progress span').style.width = `${total > 0 ? Math.min(100,100 * scrollY / total) : 0}%`;
@@ -17,6 +17,11 @@
     document.querySelectorAll('article').forEach(e=>e.hidden=e.id!==`article-${next}`);
     document.querySelectorAll('[data-download]').forEach(e=>e.hidden=e.dataset.download!==next);
     document.querySelectorAll('[data-set-lang]').forEach(b=>b.setAttribute('aria-pressed',String(b.dataset.setLang===next)));
+    document.querySelectorAll('[data-edition-link]').forEach(link=>{
+      const url = new URL(link.getAttribute('href'), location.href);
+      url.searchParams.set('lang', next);
+      link.href = url.href;
+    });
     if(preservePosition && scrollY>180) {
       const active=document.getElementById(`article-${next}`);
       window.scrollTo({top:active.offsetTop+fraction*Math.max(1,active.offsetHeight-innerHeight),behavior:'instant'});

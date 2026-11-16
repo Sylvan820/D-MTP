@@ -5,8 +5,9 @@
 <link rel="stylesheet" href="katex.min.css"><link rel="stylesheet" href="style.css"></head>
 <body>
 <header class="site-header"><div class="header-inner">
-<a class="wordmark" href="#" aria-label="DMTP home">DMTP<span class="wordmark-dot"></span></a>
+<a class="wordmark" href="index.html" data-edition-link aria-label="DMTP home">DMTP<span class="wordmark-dot"></span></a>
 <span class="header-note"><span data-lang="zh" hidden>技术博客</span><span data-lang="en">TECHNICAL BLOG</span></span>
+<nav class="version-nav" aria-label="Blog editions"><a href="index.html" data-edition-link aria-current="page">DMTP</a><a href="v1.5.html" data-edition-link>DMTP V1.5</a></nav>
 <div class="language-control" role="group" aria-label="Language / 语言">
 <button type="button" data-set-lang="zh" aria-pressed="false">中文</button><button type="button" data-set-lang="en" aria-pressed="true">English</button>
 </div></div></header>
@@ -16,13 +17,28 @@
 <div class="edition"><span class="edition-line"></span><span data-lang="zh" hidden>预训练先验 × 并行续写</span><span data-lang="en">PRETRAINED PRIORS × PARALLEL DRAFTING</span></div>
 <article id="article-zh" lang="zh-CN" hidden><h1>DMTP：让预训练 MTP 为并行 Draft 开个好头</h1>
 <p><strong>Piggy Shen · 2026 年 10 月 · 技术博客</strong></p>
+
+<div class="release-resources">
+<p class="release-note">权重与推理代码已开源。</p>
+<nav class="resource-links" aria-label="开源权重与代码">
+<a class="resource-link" href="https://huggingface.co/Piggy12/Qwen3.6-27B-DMTP" target="_blank" rel="noopener noreferrer" title="Qwen3.6-27B DMTP weights on Hugging Face"><img class="resource-icon" src="resource-model.svg" width="18" height="18" alt=""><span>HF · 3.6-27B</span></a>
+<a class="resource-link" href="https://huggingface.co/Piggy12/Qwen3.8-next-120b-dmtp" target="_blank" rel="noopener noreferrer" title="Qwen3.8-Next-120B DMTP weights on Hugging Face"><img class="resource-icon" src="resource-model.svg" width="18" height="18" alt=""><span>HF · 3.8-Next-120B</span></a>
+<a class="resource-link resource-link--primary" href="https://github.com/Sylvan820/sglang-dmtp/tree/dmtp-qsa-four-slot-20261113" target="_blank" rel="noopener noreferrer" title="DMTP QSA inference code"><img class="resource-icon" src="resource-code.svg" width="18" height="18" alt=""><span>Code</span></a>
+<a class="resource-link resource-link--primary" href="https://github.com/sgl-project/sglang/pull/50270" target="_blank" rel="noopener noreferrer" title="SGLang pull request #50270"><img class="resource-icon" src="resource-pr.svg" width="18" height="18" alt=""><span>SGLang PR</span></a>
+<a class="resource-link resource-link--primary" href="https://github.com/sgl-project/SpecForge/pull/1067" target="_blank" rel="noopener noreferrer" title="SpecForge pull request #1067"><img class="resource-icon" src="resource-pr.svg" width="18" height="18" alt=""><span>SpecForge PR</span></a>
+</nav>
+</div>
+<blockquote>
+<p><strong>News · 2026 年 11 月</strong></p>
+<p><a href="v1.5.html?lang=zh" data-edition-link><strong>DMTP V1.5</strong></a> 已发布。</p>
+</blockquote>
 <blockquote>
 <p><strong>Update · 2026 年 11 月 9 日</strong></p>
-<p>我们发现，<strong>零初始化残差与直接融合的效果接近，但更适合从已有 DFlash 权重微调续训</strong>。因此，我们将主方法更新为<strong>双 anchor + 首候选 embedding 槽位的零初始化残差</strong>，保留原始词嵌入，再逐步引入 MTP 的预测特征。</p>
+<p><strong>零初始化残差与直接融合效果接近，但更利于续训</strong>。主方法改为双 anchor，仅在 T1 embedding 加零初始化残差。</p>
 </blockquote>
 <blockquote>
 <p><strong>Update · 2026 年 11 月 4 日</strong></p>
-<p>我们发现，双 anchor 与单 anchor 从头训练时效果接近；但<strong>从已有 DFlash 权重微调续训时，双 anchor 的效果更好</strong>。此外，<strong>在接受长度接近的情况下，双 anchor 的端到端吞吐更高</strong>。因此，后续 DMTP 将采用双 anchor 形式，我们也会继续更新实验结果。本文已有实验数据保持不变。</p>
+<p>单、双 anchor 从头训练效果接近；<strong>双 anchor 续训更好，同等接受长度下端到端吞吐更高</strong>。后续采用双 anchor，本文数据不变。</p>
 </blockquote>
 <p>投机解码已成为大模型推理基础设施的重要组成部分。<a href="https://z-lab.ai/projects/dflash/">DFlash</a> 展示了并行预测多个候选的潜力，DeepSeek 也在生产服务中采用 <a href="https://arxiv.org/abs/2607.05147">DSpark</a>，并报告了相对 MTP 的收益。然而，在 GLM、Qwen 等原生 MTP 训练充分的模型及部分对话场景中，DFlash 相比 MTP 并不总有显著优势。我们关注的是如何复用 MTP 的首 token 预测能力。</p>
 <p>我们的评测以及与 <a href="https://arxiv.org/abs/2605.29707">Domino</a> 作者 Jianuo Huang 的讨论，揭示了两者的互补性：原生 MTP 的首 token 接受率更高，在训练分布之外的场景下尤其明显；DFlash 则能并行生成更长的续写。这为结合预训练首位能力与并行预测提供了直接动机。</p>
@@ -646,13 +662,28 @@ Target：验证七个候选，提交接受前缀与修正/bonus
 </article>
 <article id="article-en" lang="en"><h1>DMTP: A Better First Token for Block Drafting via MTP</h1>
 <p><strong>Piggy Shen · October 2026 · Technical Blog</strong></p>
+
+<div class="release-resources">
+<p class="release-note">Model weights and inference code are open source.</p>
+<nav class="resource-links" aria-label="Open-source weights and code">
+<a class="resource-link" href="https://huggingface.co/Piggy12/Qwen3.6-27B-DMTP" target="_blank" rel="noopener noreferrer" title="Qwen3.6-27B DMTP weights on Hugging Face"><img class="resource-icon" src="resource-model.svg" width="18" height="18" alt=""><span>HF · 3.6-27B</span></a>
+<a class="resource-link" href="https://huggingface.co/Piggy12/Qwen3.8-next-120b-dmtp" target="_blank" rel="noopener noreferrer" title="Qwen3.8-Next-120B DMTP weights on Hugging Face"><img class="resource-icon" src="resource-model.svg" width="18" height="18" alt=""><span>HF · 3.8-Next-120B</span></a>
+<a class="resource-link resource-link--primary" href="https://github.com/Sylvan820/sglang-dmtp/tree/dmtp-qsa-four-slot-20261113" target="_blank" rel="noopener noreferrer" title="DMTP QSA inference code"><img class="resource-icon" src="resource-code.svg" width="18" height="18" alt=""><span>Code</span></a>
+<a class="resource-link resource-link--primary" href="https://github.com/sgl-project/sglang/pull/50270" target="_blank" rel="noopener noreferrer" title="SGLang pull request #50270"><img class="resource-icon" src="resource-pr.svg" width="18" height="18" alt=""><span>SGLang PR</span></a>
+<a class="resource-link resource-link--primary" href="https://github.com/sgl-project/SpecForge/pull/1067" target="_blank" rel="noopener noreferrer" title="SpecForge pull request #1067"><img class="resource-icon" src="resource-pr.svg" width="18" height="18" alt=""><span>SpecForge PR</span></a>
+</nav>
+</div>
+<blockquote>
+<p><strong>News · November 2026</strong></p>
+<p><a href="v1.5.html?lang=en" data-edition-link><strong>DMTP V1.5</strong></a> is now available.</p>
+</blockquote>
 <blockquote>
 <p><strong>Update · November 9, 2026</strong></p>
-<p>We find that <strong>zero-initialized residual injection performs comparably to direct fusion and is better suited to continued fine-tuning from existing DFlash weights</strong>. We therefore adopt <strong>two anchors with a zero-initialized residual at the first candidate&#39;s embedding slot</strong>, retaining the original embedding while learning to incorporate MTP&#39;s predictive features.</p>
+<p><strong>Zero-initialized residuals match direct fusion and favor continued fine-tuning.</strong> We adopt dual anchors with a zero-initialized residual only at the T1 embedding.</p>
 </blockquote>
 <blockquote>
 <p><strong>Update · November 4, 2026</strong></p>
-<p>We find that single- and dual-anchor layouts perform similarly when trained from scratch, but <strong>the dual-anchor layout performs better when fine-tuning from existing DFlash weights</strong>. It also achieves <strong>higher end-to-end throughput at comparable acceptance lengths</strong>. We will therefore adopt the dual-anchor layout for subsequent DMTP models and continue sharing updated results. The experimental results reported here remain unchanged.</p>
+<p>Scratch results are similar. <strong>Dual anchors fine-tune better and deliver higher end-to-end throughput at comparable acceptance lengths.</strong> We adopt dual anchors; reported results remain unchanged.</p>
 </blockquote>
 <p>Speculative decoding is an important component of LLM inference infrastructure. <a href="https://z-lab.ai/projects/dflash/">DFlash</a> demonstrates the potential of parallel candidate prediction, while DeepSeek has deployed <a href="https://arxiv.org/abs/2607.05147">DSpark</a> in production and reported gains over MTP. Yet DFlash does not consistently outperform MTP on models with well-trained native MTP modules, such as GLM and Qwen, or on some conversation workloads. We focus on reusing MTP&#39;s first-token prediction capability.</p>
 <p>Our evaluations and discussions with <a href="https://arxiv.org/abs/2605.29707">Domino</a> author Jianuo Huang highlight complementary strengths: native MTP has higher first-token acceptance, particularly on workloads outside the training distribution, while DFlash generates a longer continuation in parallel. This motivates combining pretrained first-token prediction with parallel drafting.</p>
@@ -1274,6 +1305,7 @@ Target:  verify seven candidates and commit the accepted prefix plus correction/
 }
 </code></pre>
 </article>
+<nav class="article-pagination" aria-label="Other editions"><a class="edition-next" href="v1.5.html" data-edition-link><span class="pagination-label"><span data-lang="zh" hidden>下一篇</span><span data-lang="en">NEXT ARTICLE</span></span><strong>DMTP V1.5 <span aria-hidden="true">&rarr;</span></strong></a></nav>
 <footer class="article-footer"><strong>DMTP</strong><span data-lang="zh" hidden>MTP 生成首个候选，DFlash 并行续写。</span><span data-lang="en">MTP starts. DFlash continues.</span><a data-download="zh" href="DMTP.zh.md" download hidden>Markdown ↓</a><a data-download="en" href="DMTP.en.md" download>Markdown ↓</a></footer>
 </div>
 <aside class="contents" aria-label="Contents"><p data-lang="zh" hidden>本文内容</p><p data-lang="en">ON THIS PAGE</p>

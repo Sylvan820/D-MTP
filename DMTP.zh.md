@@ -2,13 +2,28 @@
 
 **Piggy Shen · 2026 年 10 月 · 技术博客**
 
+<div class="release-resources">
+<p class="release-note">权重与推理代码已开源。</p>
+<nav class="resource-links" aria-label="开源权重与代码">
+<a class="resource-link" href="https://huggingface.co/Piggy12/Qwen3.6-27B-DMTP" target="_blank" rel="noopener noreferrer" title="Qwen3.6-27B DMTP weights on Hugging Face"><img class="resource-icon" src="resource-model.svg" width="18" height="18" alt=""><span>HF · 3.6-27B</span></a>
+<a class="resource-link" href="https://huggingface.co/Piggy12/Qwen3.8-next-120b-dmtp" target="_blank" rel="noopener noreferrer" title="Qwen3.8-Next-120B DMTP weights on Hugging Face"><img class="resource-icon" src="resource-model.svg" width="18" height="18" alt=""><span>HF · 3.8-Next-120B</span></a>
+<a class="resource-link resource-link--primary" href="https://github.com/Sylvan820/sglang-dmtp/tree/dmtp-qsa-four-slot-20261113" target="_blank" rel="noopener noreferrer" title="DMTP QSA inference code"><img class="resource-icon" src="resource-code.svg" width="18" height="18" alt=""><span>Code</span></a>
+<a class="resource-link resource-link--primary" href="https://github.com/sgl-project/sglang/pull/50270" target="_blank" rel="noopener noreferrer" title="SGLang pull request #50270"><img class="resource-icon" src="resource-pr.svg" width="18" height="18" alt=""><span>SGLang PR</span></a>
+<a class="resource-link resource-link--primary" href="https://github.com/sgl-project/SpecForge/pull/1067" target="_blank" rel="noopener noreferrer" title="SpecForge pull request #1067"><img class="resource-icon" src="resource-pr.svg" width="18" height="18" alt=""><span>SpecForge PR</span></a>
+</nav>
+</div>
+
+> **News · 2026 年 11 月**
+>
+> [**DMTP V1.5**](v1.5.html?lang=zh) 已发布。
+
 > **Update · 2026 年 11 月 9 日**
 >
-> 我们发现，**零初始化残差与直接融合的效果接近，但更适合从已有 DFlash 权重微调续训**。因此，我们将主方法更新为**双 anchor + 首候选 embedding 槽位的零初始化残差**，保留原始词嵌入，再逐步引入 MTP 的预测特征。
+> **零初始化残差与直接融合效果接近，但更利于续训**。主方法改为双 anchor，仅在 T1 embedding 加零初始化残差。
 
 > **Update · 2026 年 11 月 4 日**
 >
-> 我们发现，双 anchor 与单 anchor 从头训练时效果接近；但**从已有 DFlash 权重微调续训时，双 anchor 的效果更好**。此外，**在接受长度接近的情况下，双 anchor 的端到端吞吐更高**。因此，后续 DMTP 将采用双 anchor 形式，我们也会继续更新实验结果。本文已有实验数据保持不变。
+> 单、双 anchor 从头训练效果接近；**双 anchor 续训更好，同等接受长度下端到端吞吐更高**。后续采用双 anchor，本文数据不变。
 
 投机解码已成为大模型推理基础设施的重要组成部分。[DFlash](https://z-lab.ai/projects/dflash/) 展示了并行预测多个候选的潜力，DeepSeek 也在生产服务中采用 [DSpark](https://arxiv.org/abs/2607.05147)，并报告了相对 MTP 的收益。然而，在 GLM、Qwen 等原生 MTP 训练充分的模型及部分对话场景中，DFlash 相比 MTP 并不总有显著优势。我们关注的是如何复用 MTP 的首 token 预测能力。
 

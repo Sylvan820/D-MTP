@@ -1,0 +1,669 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>DMTP V1.5: The Benefits of Shifting the Draft</title>
+<meta name="description" content="DMTP V1.5 separates first-token, hidden-state and known-T1 shifting gains with per-verify acceptance-length ablations.">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="site-header"><div class="header-inner">
+<a class="wordmark" href="index.html" data-edition-link aria-label="DMTP home">DMTP<span class="wordmark-dot"></span></a>
+<span class="header-note"><span data-lang="zh" hidden>技术博客</span><span data-lang="en">TECHNICAL BLOG</span></span>
+<nav class="version-nav" aria-label="Blog editions"><a href="index.html" data-edition-link>DMTP</a><a href="v1.5.html" data-edition-link aria-current="page">DMTP V1.5</a></nav>
+<div class="language-control" role="group" aria-label="Language / 语言">
+<button type="button" data-set-lang="zh" aria-pressed="false">中文</button><button type="button" data-set-lang="en" aria-pressed="true">English</button>
+</div></div></header>
+<div class="reading-progress" aria-hidden="true"><span></span></div>
+<main class="layout">
+<div class="article-column">
+<div class="edition"><span class="edition-line"></span><span data-lang="zh" hidden>技术博客 · V1.5</span><span data-lang="en">TECHNICAL BLOG · V1.5</span></div>
+<article id="article-zh" lang="zh-CN" hidden>
+<!-- v15:zh:start -->
+<h1>DMTP V1.5：移位带来的收益</h1>
+<p>2026 年 11 月 · 技术博客</p>
+<div class="release-resources">
+<p class="release-note">权重与推理代码已开源。</p>
+<nav class="resource-links" aria-label="开源权重与代码">
+<a class="resource-link" href="https://huggingface.co/Piggy12/Qwen3.6-27B-DMTP" target="_blank" rel="noopener noreferrer" title="Qwen3.6-27B DMTP weights on Hugging Face"><img class="resource-icon" src="resource-model.svg" width="18" height="18" alt=""><span>HF · 3.6-27B</span></a>
+<a class="resource-link" href="https://huggingface.co/Piggy12/Qwen3.8-next-120b-dmtp" target="_blank" rel="noopener noreferrer" title="Qwen3.8-Next-120B DMTP weights on Hugging Face"><img class="resource-icon" src="resource-model.svg" width="18" height="18" alt=""><span>HF · 3.8-Next-120B</span></a>
+<a class="resource-link resource-link--primary" href="https://github.com/Sylvan820/sglang-dmtp/tree/dmtp-qsa-four-slot-20261113" target="_blank" rel="noopener noreferrer" title="DMTP QSA inference code"><img class="resource-icon" src="resource-code.svg" width="18" height="18" alt=""><span>Code</span></a>
+<a class="resource-link resource-link--primary" href="https://github.com/sgl-project/sglang/pull/50270" target="_blank" rel="noopener noreferrer" title="SGLang pull request #50270"><img class="resource-icon" src="resource-pr.svg" width="18" height="18" alt=""><span>SGLang PR</span></a>
+<a class="resource-link resource-link--primary" href="https://github.com/sgl-project/SpecForge/pull/1067" target="_blank" rel="noopener noreferrer" title="SpecForge pull request #1067"><img class="resource-icon" src="resource-pr.svg" width="18" height="18" alt=""><span>SpecForge PR</span></a>
+</nav>
+</div>
+
+<p>在 <a href="index.html?lang=zh">DMTP V1</a> 中，我们讨论了 DMTP 相比 DFlash 的三类收益：MTP 的首位预测能力、给定 T1 后并行起草的移位，以及 MTP hidden 提供的额外信息。V1.5 进一步拆开这三件事，尤其是容易被首位优势掩盖的<strong>移位收益</strong>。</p>
+<p><strong>即使 MTP 与 DFlash 的首 token accuracy 接近，DMTP 仍能受益：让 MTP 负责 T1，DFlash 就从 T2 开始，把后续候选的预测距离缩短一个位置。</strong></p>
+<h2 id="zh-v15-0">1. 重新拆解 DMTP 的三类收益</h2>
+<h3>预训练首位能力：优势取决于训练与 domain</h3>
+<p>MTP 的首 token accuracy 并不是天然高于 DFlash。它与 MTP 的训练充分程度、数据分布和评测 domain 强相关；DFlash 经过针对性训练，在熟悉的任务上未必比 MTP 差。</p>
+<p>在我们测试的 Qwen3.5、Qwen3.6 配置中，MTP 的首位优势较明显。而在所测 Qwen3.8 配置上，DFlash2 已能接近 MTP 的首位水平。我们怀疑这一变化与主模型训练数据的 pattern 有关。</p>
+<p>不同模型团队的情况也不同，我们观察到 GLM 的 MTP 首位能力较强。因此，重点不是“MTP 一定更准”，而是<strong>它的首位预测经历了大量预训练数据，有机会保留更好的分布外泛化能力</strong>。</p>
+<p>在 OOD、长文和更复杂的场景中，这种预训练先验可能更稳健。DMTP 通过 MTP 提供的 T1 复用这项能力，再让 DFlash 并行续写。这是向更长、更复杂负载迁移的动机，而不是对所有 domain 的统一保证。</p>
+<h3>移位：DMTP 的第二个 token，是 DFlash 的第一个未知 token</h3>
+<p>原始 DFlash 从 A 出发，同时预测 T1、T2、T3……。DMTP 则先得到 T1，再让 DFlash 预测 T2、T3……。训练时，T1 使用 ground truth；推理时，T1 来自真实的 MTP 提议。</p>
+<pre><code class="language-text">原始 DFlash：A 已知       → 预测 T1、T2、T3……
+DMTP：      A、T1 已知   → 预测 T2、T3、T4……
+                           ↑
+                      第一个未知位置
+</code></pre>
+<p>因此，DMTP 的 T2 承担的是 DFlash“第一个未知 token”的预测任务，其训练 accuracy 可以逼近原始 DFlash 的 T1，而不再承担原始第二位置的预测难度。后续位置也获得类似的移位机会。</p>
+<p><strong>这不是把推理输出整体挪一格，而是改变并行起草的条件：在已知 T1 的基础上预测后面的 token。</strong> 实际提升仍取决于训练、T1 质量和推理分布，不能只凭移位形式保证每一位置都更准。</p>
+<p>当 MTP 和 DFlash 首位 accuracy 已经相近时，只更换首位的收益会变小，<strong>移位就成为 DMTP 仍能提升接受长度的重要来源</strong>。这是 V1.5 最想强调的一点。</p>
+<h3>Hidden 信息：传递预测 T1 时的表示</h3>
+<p>除了 T1 这个离散 token，MTP 还提供预测它时的 hidden。DFlash 可以利用这份额外表示续写；它与“更准的首位”和“已知 T1 带来的移位”是不同的收益来源。</p>
+<p>此前的接口对照中，加入 hidden 能带来一定接受长度收益，但不同 hidden 利用方式之间的差距相对有限。因此，我们保留残差接口，在传递特征的同时保持原有 embedding 路径，便于已有 DFlash 权重续训。</p>
+<h2 id="zh-v15-1">2. 逐级消融：首位、hidden 与移位</h2>
+<p>我们从 DFlash 逐步加入三项改动：<strong>DFlash + MTP 首位</strong>只替换第一个候选，观察首位收益；<strong>hidden-only</strong>在此基础上加入 MTP hidden；<strong>hidden + T1</strong>再将 T1 作为已知输入，让 DFlash 从 T2 开始预测，观察移位收益。</p>
+<figure><a href="v15-shift-ablation.png" target="_blank" rel="noopener"><img src="v15-shift-ablation.png" alt="Code 128K、Long-horizon 80K 和 MT-Bench 上的 per-verify 接受长度消融，突出 hidden-only 到 hidden + T1 的移位收益"></a></figure>
+
+<p><em>图 1：per-verify 平均接受长度。四种方法逐步加入 MTP 首位、MTP hidden 和已知 T1；两种训练变体均使用 60K checkpoint。</em></p>
+<div class="table-scroll" tabindex="0"><table>
+<thead>
+<tr>
+<th>数据集</th>
+<th align="right">仅换首位的增量</th>
+<th align="right">加 hidden 的增量</th>
+<th align="right">加 T1 / 移位的增量</th>
+<th align="right">移位相对 Hidden-only</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Code 128K</td>
+<td align="right">+0.1283</td>
+<td align="right">+0.0378</td>
+<td align="right"><strong>+0.2662</strong></td>
+<td align="right"><strong>+5.97%</strong></td>
+</tr>
+<tr>
+<td>Long-horizon 80K</td>
+<td align="right">−0.0107</td>
+<td align="right">+0.0703</td>
+<td align="right"><strong>+0.3657</strong></td>
+<td align="right"><strong>+9.54%</strong></td>
+</tr>
+<tr>
+<td>MT-Bench Think</td>
+<td align="right">+0.1387</td>
+<td align="right">+0.0299</td>
+<td align="right"><strong>+0.2960</strong></td>
+<td align="right"><strong>+9.90%</strong></td>
+</tr>
+<tr>
+<td>MT-Bench Non-think</td>
+<td align="right">+0.1257</td>
+<td align="right">+0.0163</td>
+<td align="right"><strong>+0.2600</strong></td>
+<td align="right"><strong>+8.93%</strong></td>
+</tr>
+</tbody></table>
+</div><p><em>增量均对比前一步；最后一列以 hidden-only 为分母。图表采用 per-verify 接受长度，不代表端到端吞吐。</em></p>
+<p>本组配置中，MTP 首位 accuracy 仅高约 <strong>1～2 个百分点</strong>，首位替换和 hidden 的增量较小；<strong>移位则在四项负载上进一步带来 5.97%～9.90% 的接受长度提升</strong>。这说明，首位能力相近时，让 DFlash 从 T2 开始、重新站到“第一个未知位置”上，是 DMTP 的重要收益来源。</p>
+<h2 id="zh-v15-2">3. From scratch 与 From ckpt</h2>
+<p>我们尝试了从头训练和基于已有 checkpoint 续训两条路线，后者更适合快速复用已有 Draft 的能力。</p>
+<h3>From scratch</h3>
+<p>在 Qwen3.6-27B 上，我们冻结 Target 与 MTP，从头训练 DMTP Draft。权重见 <a href="https://huggingface.co/Piggy12/Qwen3.6-27B-DMTP/tree/main">Piggy12/Qwen3.6-27B-DMTP</a>。</p>
+<p>Baseline 为<strong>相同训练配置的 DFlash2</strong>，两组均开启 <strong>token RS</strong>。下面只比较 DFlash2 与双 anchor DMTP，接受长度采用 <strong>per-verify</strong> 口径。</p>
+<div class="table-scroll" tabindex="0"><table>
+<thead>
+<tr>
+<th>数据集</th>
+<th align="right">DFlash2 · token RS</th>
+<th align="right">双 anchor DMTP · token RS</th>
+<th align="right">提升</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Code</td>
+<td align="right">3.9621</td>
+<td align="right"><strong>4.6022</strong></td>
+<td align="right">+16.16%</td>
+</tr>
+<tr>
+<td>Math</td>
+<td align="right">4.2909</td>
+<td align="right"><strong>4.8871</strong></td>
+<td align="right">+13.89%</td>
+</tr>
+<tr>
+<td>MT-Bench</td>
+<td align="right">4.0044</td>
+<td align="right"><strong>4.1826</strong></td>
+<td align="right">+4.45%</td>
+</tr>
+<tr>
+<td>Agent</td>
+<td align="right">3.8197</td>
+<td align="right"><strong>4.6871</strong></td>
+<td align="right"><strong>+22.71%</strong></td>
+</tr>
+<tr>
+<td>SWE</td>
+<td align="right">2.9273</td>
+<td align="right"><strong>3.9427</strong></td>
+<td align="right"><strong>+34.69%</strong></td>
+</tr>
+<tr>
+<td>Long-horizon</td>
+<td align="right">3.1929</td>
+<td align="right"><strong>4.3310</strong></td>
+<td align="right"><strong>+35.64%</strong></td>
+</tr>
+</tbody></table>
+</div><p><strong>训练数据不包含 Agent 数据，但 DMTP 在 Agent、SWE 与 Long-horizon 上仍有明显提升。</strong> 这支持我们复用 MTP 预训练能力的思路：不依赖额外 Agent 专项训练，也能增强 DFlash2 在这些负载上的起草与接受能力；这里的提升指接受长度，不是任务成功率。</p>
+<h3>From ckpt</h3>
+<p>我们从已有 DFlash2 checkpoint 出发，加入双 anchor 和 T1 零初始化残差，在 SFT 数据上微调。Target 与 MTP 冻结，只更新 Draft、selector 和残差层。<strong>不必重训整套 Draft，只需数千步微调，就能学习 DMTP“已知 T1、从 T2 开始预测”的移位续写能力。</strong></p>
+<p>下面从经过 <strong>CPT（Continued Pre-training）</strong> 的 DFlash2 续训 <strong>4,000 步</strong>。起点的首 token 接受率已与 MTP 接近，部分任务甚至更高，后续位置仍能从移位中获益。</p>
+<p>每格按 <strong>MTP / DFlash2 CPT / DMTP4000</strong> 排列，粗体标出 DMTP。数值为 <strong>per-verify 逐位置累计接受率（%，不含 bonus）</strong>，不是条件接受率。</p>
+<div class="table-scroll" tabindex="0"><table class="position-ablation">
+<thead>
+<tr>
+<th>数据集</th>
+<th align="right">T1</th>
+<th align="right">T2</th>
+<th align="right">T3</th>
+<th align="right">T4</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>General</td>
+<td align="right">74.78 / 75.69 / <strong>75.15</strong></td>
+<td align="right">55.27 / 54.31 / <strong>57.90</strong></td>
+<td align="right">41.38 / 39.28 / <strong>43.99</strong></td>
+<td align="right">31.72 / 29.14 / <strong>34.07</strong></td>
+</tr>
+<tr>
+<td>Reason</td>
+<td align="right">75.72 / 75.91 / <strong>76.04</strong></td>
+<td align="right">56.45 / 52.58 / <strong>58.73</strong></td>
+<td align="right">42.00 / 35.74 / <strong>43.00</strong></td>
+<td align="right">31.50 / 24.60 / <strong>30.93</strong></td>
+</tr>
+<tr>
+<td>Agent</td>
+<td align="right">86.40 / 86.58 / <strong>85.87</strong></td>
+<td align="right">74.73 / 73.56 / <strong>75.17</strong></td>
+<td align="right">65.12 / 63.10 / <strong>65.61</strong></td>
+<td align="right">57.18 / 55.19 / <strong>57.75</strong></td>
+</tr>
+<tr>
+<td>Long-horizon</td>
+<td align="right">83.13 / 83.08 / <strong>82.87</strong></td>
+<td align="right">70.00 / 66.99 / <strong>71.35</strong></td>
+<td align="right">59.28 / 54.66 / <strong>60.92</strong></td>
+<td align="right">50.99 / 45.35 / <strong>51.96</strong></td>
+</tr>
+<tr>
+<td>SWE</td>
+<td align="right">86.63 / 88.08 / <strong>86.51</strong></td>
+<td align="right">74.61 / 74.54 / <strong>76.54</strong></td>
+<td align="right">64.64 / 62.72 / <strong>66.35</strong></td>
+<td align="right">56.03 / 53.24 / <strong>57.43</strong></td>
+</tr>
+<tr>
+<td>Search</td>
+<td align="right">80.30 / 82.83 / <strong>79.81</strong></td>
+<td align="right">62.97 / 64.08 / <strong>64.93</strong></td>
+<td align="right">49.32 / 48.40 / <strong>50.41</strong></td>
+<td align="right">38.90 / 36.71 / <strong>38.55</strong></td>
+</tr>
+</tbody></table>
+</div><div class="table-scroll" tabindex="0"><table class="position-ablation">
+<thead>
+<tr>
+<th>数据集</th>
+<th align="right">T5</th>
+<th align="right">T6</th>
+<th align="right">T7</th>
+<th align="right">T8</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>General</td>
+<td align="right">24.86 / 22.36 / <strong>27.16</strong></td>
+<td align="right">19.61 / 17.65 / <strong>21.99</strong></td>
+<td align="right">15.53 / 14.21 / <strong>18.05</strong></td>
+<td align="right">12.22 / 11.68 / <strong>14.88</strong></td>
+</tr>
+<tr>
+<td>Reason</td>
+<td align="right">23.75 / 17.39 / <strong>22.35</strong></td>
+<td align="right">18.00 / 12.65 / <strong>16.36</strong></td>
+<td align="right">13.74 / 9.43 / <strong>12.20</strong></td>
+<td align="right">10.53 / 7.21 / <strong>9.26</strong></td>
+</tr>
+<tr>
+<td>Agent</td>
+<td align="right">50.52 / 48.88 / <strong>51.42</strong></td>
+<td align="right">44.53 / 43.91 / <strong>46.21</strong></td>
+<td align="right">39.39 / 39.73 / <strong>41.97</strong></td>
+<td align="right">34.58 / 36.21 / <strong>38.31</strong></td>
+</tr>
+<tr>
+<td>Long-horizon</td>
+<td align="right">44.08 / 38.24 / <strong>44.69</strong></td>
+<td align="right">38.03 / 32.81 / <strong>39.03</strong></td>
+<td align="right">33.00 / 28.70 / <strong>34.55</strong></td>
+<td align="right">28.76 / 25.29 / <strong>30.72</strong></td>
+</tr>
+<tr>
+<td>SWE</td>
+<td align="right">49.13 / 45.93 / <strong>49.85</strong></td>
+<td align="right">43.12 / 40.39 / <strong>44.03</strong></td>
+<td align="right">37.71 / 35.98 / <strong>39.37</strong></td>
+<td align="right">32.85 / 32.56 / <strong>35.53</strong></td>
+</tr>
+<tr>
+<td>Search</td>
+<td align="right">30.69 / 28.27 / <strong>29.67</strong></td>
+<td align="right">24.50 / 22.17 / <strong>23.36</strong></td>
+<td align="right">19.57 / 17.76 / <strong>18.80</strong></td>
+<td align="right">15.57 / 14.45 / <strong>15.25</strong></td>
+</tr>
+</tbody></table>
+</div><p><strong>从 T2 开始，DMTP 在六项负载的所有后续位置上都高于 DFlash2 CPT，多数位置也高于 MTP。</strong> 这体现了移位的收益：即使首位已经相近，让 Draft 以已知 T1 开始续写，仍能改善后续起草。</p>
+<h2 id="zh-v15-3">4. 联合训练：进一步提升专项任务的首位能力</h2>
+<p>如果原生 MTP 在某个 domain 的首位 accuracy 不如专门训练的 DFlash，只依靠冻结 MTP 就会限制 DMTP 的收益。为此，我们进一步尝试 <strong>MTP 与 DFlash 联合 SFT</strong>：保留移位收益，同时让 MTP 的首位预测也适应专项数据。</p>
+<p>我们保持 Target 主干冻结，同时训练 MTP 的首位预测与 DFlash 的后续起草，让两者共同适应专项数据。</p>
+<h3>联合 Loss：首位与续写分别学习</h3>
+<p>T1 由 MTP 预测，T2～T8 由 DFlash 基础头预测，两者都对齐冻结 Target 的全词表分布，使用 <strong>LogTV</strong>；selector 另在各位置的 top-16 候选集合内计算 teacher 到 selector 的 KL：</p>
+<pre><code class="language-text">LogTV(p, q) = -log(max(sum_v min(p(v), q(v)), 1e-6))
+L_joint = sum_{i=1..8} w_i * LogTV(p_i, q_i)
+        + sum_{i=2..8} v_i * KL(p_i restricted to S_i || s_i)
+w_i ∝ exp(-(i-1)/4),  sum_{i=1..8} w_i = 1
+v_i ∝ exp(-(i-2)/4),  sum_{i=2..8} v_i = 1
+</code></pre>
+<p>其中 p 为 Target 分布，q 为对应位置的 MTP 或 DFlash 基础头分布，s 为 selector 分布；KL 两侧都在候选集 S 内重新归一化。首位与尾部 LogTV 使用统一的八位置衰减，selector 保留原七位置权重，不额外给 T1 加 selector loss 或 hard-label CE。</p>
+<p><strong>MTP 由 T1 LogTV 更新，DFlash、selector 与融合层由尾部目标更新。</strong> 供融合使用的 MTP hidden 仍然 detach，尾部梯度不回传 MTP；Target 主干、共享 embedding 和 LM head 冻结。上式表示单个有效 block 的目标，实际还按 loss mask 汇总，并保留原有 MoE 辅助项。</p>
+<figure><a href="v15-joint-position-gain.png" target="_blank" rel="noopener"><img loading="lazy" src="v15-joint-position-gain.png" alt="九项任务上相对 DFlash V2 的逐位置累计接受率增益，比较 500 步冻结 MTP 与联合训练的 DMTP"></a></figure>
+
+<p><em>图 2：相对 DFlash V2 的逐位置累计接受率增益（pp）。蓝色为冻结 MTP，紫色为联合训练；本文关注 per-verify 虚线，原图实线为 per-request。</em></p>
+<p><strong>联合训练后，首位优势可以重新建立。</strong> 在 Math500、HumanEval 和 MT-Bench 上，冻结 MTP 时 T1 略低于 DFlash V2；联合训练后，per-verify 的 T1 增益转为正值，后续多个位置也得到更明显的改善。</p>
+<h3>Terminal Bench：RL trace 专项适配</h3>
+<p>我们还用已采集的 <strong>Terminal Bench RL trace 做 SFT</strong>，进一步适配终端与 agent 场景，而不是在线运行 RL。下面是另一组同一 CPT 初始化、Target 主干不变的对照：冻结 MTP，仅训练 Draft，与同时更新 MTP 的联合训练比较。</p>
+<p>评测使用 Terminal Bench 的 255 条展开请求，RS 开启、并发 32，每轮起草 8 个候选。表中均为 <strong>per-verify</strong>：接受长度含 bonus，首 token 接受率不含 bonus。</p>
+<div class="table-scroll" tabindex="0"><table>
+<thead>
+<tr>
+<th>训练方式</th>
+<th align="right">接受长度</th>
+<th align="right">首 token 接受率</th>
+<th align="right">接受长度提升</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>单独训练 750 步，冻结 MTP</td>
+<td align="right">4.3178</td>
+<td align="right">79.80%</td>
+<td align="right">—</td>
+</tr>
+<tr>
+<td>联合训练 750 步</td>
+<td align="right">4.4239</td>
+<td align="right">81.18%</td>
+<td align="right"><strong>+2.46%</strong></td>
+</tr>
+<tr>
+<td>联合训练 900 步</td>
+<td align="right"><strong>4.4745</strong></td>
+<td align="right"><strong>81.45%</strong></td>
+<td align="right"><strong>+3.63%</strong></td>
+</tr>
+</tbody></table>
+</div><p><strong>同为 750 步，联合训练将首位接受率提高 1.38 个百分点，接受长度提高 2.46%。</strong> 继续至 900 步还有提升，但相对冻结组的比较包含额外 150 步训练；这里衡量的是推理接受率，不是 Terminal Bench 任务成功率。</p>
+<p><strong>移位提高后续起草能力，联合训练则补强专项任务的首位能力。</strong> 两者结合，让 DMTP 在这些专项场景中获得更明显的接受率收益。</p>
+<h2 id="zh-v15-4">5. Future Directions</h2>
+<h3>不依赖原生 MTP 的首位预测</h3>
+<p>未来的主模型未必都会在预训练阶段配套训练 MTP。我们也在探索 <strong>EAGLE + DFlash</strong>：由 EAGLE 式轻量预测器承担首位，再交给 DFlash 并行续写，并通过 <strong>CPT 联合训练首位模块与 DFlash</strong>，尝试替代对原生预训练 MTP 的依赖。</p>
+<p>我们希望用较低的追加训练成本获得这套协作能力，而不必重复主模型级别的大规模预训练。它可能成为下一代投机解码的一种范式，但效果、泛化性与训练成本仍需要实验验证。</p>
+<p>围绕这一方向，还有几个关键问题：</p>
+<ul>
+<li><strong>首位差距来自哪里？</strong> MTP 与 DFlash 的首 token accuracy 差异，分别有多少来自层数、结构、hidden 注入方式，以及训练数据与目标？</li>
+<li><strong>如何减少串行开销？</strong> 尤其是 LM head 的词表投影、选词和首位模块执行，能否在保持采样正确性的前提下进一步优化？</li>
+<li><strong>如何设计联合 Loss？</strong> 如何平衡首位与尾部目标、selector 和位置权重，在 domain 适配时保留预训练泛化能力，并让训练目标更贴近实际接受长度与吞吐？</li>
+</ul>
+<h3>一起推进落地</h3>
+<p>我们正在与 <strong>Qwen、GLM 团队合作推进 DMTP 落地</strong>，也与 <strong>MiniMax 等团队交流</strong>过相关设计。权重与推理代码均已开源；从架构设计、联合训练到推理优化，都需要社区共同探索和维护。欢迎复现、反馈，以及来自不同模型和负载的贡献。</p>
+<hr>
+<p><a href="index.html?lang=zh">上一篇：DMTP V1</a></p>
+<!-- v15:zh:end -->
+</article>
+<article id="article-en" lang="en">
+<!-- v15:en:start -->
+<h1>DMTP V1.5: The Benefits of Shifting the Draft</h1>
+<p>November 2026 · Technical Blog</p>
+<div class="release-resources">
+<p class="release-note">Model weights and inference code are open source.</p>
+<nav class="resource-links" aria-label="Open-source weights and code">
+<a class="resource-link" href="https://huggingface.co/Piggy12/Qwen3.6-27B-DMTP" target="_blank" rel="noopener noreferrer" title="Qwen3.6-27B DMTP weights on Hugging Face"><img class="resource-icon" src="resource-model.svg" width="18" height="18" alt=""><span>HF · 3.6-27B</span></a>
+<a class="resource-link" href="https://huggingface.co/Piggy12/Qwen3.8-next-120b-dmtp" target="_blank" rel="noopener noreferrer" title="Qwen3.8-Next-120B DMTP weights on Hugging Face"><img class="resource-icon" src="resource-model.svg" width="18" height="18" alt=""><span>HF · 3.8-Next-120B</span></a>
+<a class="resource-link resource-link--primary" href="https://github.com/Sylvan820/sglang-dmtp/tree/dmtp-qsa-four-slot-20261113" target="_blank" rel="noopener noreferrer" title="DMTP QSA inference code"><img class="resource-icon" src="resource-code.svg" width="18" height="18" alt=""><span>Code</span></a>
+<a class="resource-link resource-link--primary" href="https://github.com/sgl-project/sglang/pull/50270" target="_blank" rel="noopener noreferrer" title="SGLang pull request #50270"><img class="resource-icon" src="resource-pr.svg" width="18" height="18" alt=""><span>SGLang PR</span></a>
+<a class="resource-link resource-link--primary" href="https://github.com/sgl-project/SpecForge/pull/1067" target="_blank" rel="noopener noreferrer" title="SpecForge pull request #1067"><img class="resource-icon" src="resource-pr.svg" width="18" height="18" alt=""><span>SpecForge PR</span></a>
+</nav>
+</div>
+
+<p>In <a href="index.html?lang=en">DMTP V1</a>, we discussed three sources of improvement over DFlash: MTP&#39;s first-token capability, shifting parallel drafting after a known T1, and the extra information in MTP hidden states.</p>
+<p>V1.5 separates these effects, focusing on <strong>the gain from shifting the draft</strong>, which can be obscured by a stronger first token.</p>
+<p><strong>Even with similar first-token accuracy, DMTP can benefit: MTP proposes T1, so DFlash starts at T2 and predicts continuation tokens one position closer to its known prefix.</strong></p>
+<h2 id="en-v15-0">1. Three Sources of Improvement</h2>
+<h3>First-token pretraining: training and domain matter</h3>
+<p>MTP does not inherently have higher first-token accuracy than DFlash. The comparison depends on training, data distribution and evaluation domain. A task-trained DFlash can match or outperform MTP in familiar settings.</p>
+<p>In our tested Qwen3.5 and Qwen3.6 configurations, MTP had a clear first-token advantage. In our tested Qwen3.8 configuration, DFlash2 approaches MTP&#39;s first-token accuracy.</p>
+<p>We suspect target training-data patterns contribute to this change. Results also vary across teams; we have observed stronger MTP first-token performance in GLM settings.</p>
+<p>The point is not that MTP must always win. <strong>Its first-token predictor has seen extensive pretraining data and may retain stronger out-of-distribution generalization.</strong></p>
+<p>DMTP reuses this capability through T1, then continues with parallel DFlash drafting. This motivates extending it to longer and more complex workloads, rather than guaranteeing gains in every domain.</p>
+<h3>Shifting: DMTP&#39;s second token is DFlash&#39;s first unknown token</h3>
+<p>Original DFlash predicts T1, T2, T3 and so on from A. DMTP first obtains T1, then asks DFlash for T2 onward. Training uses ground-truth T1; inference uses the actual MTP proposal.</p>
+<pre><code class="language-text">Original DFlash: A known      -&gt; predict T1, T2, T3 ...
+DMTP:           A, T1 known  -&gt; predict T2, T3, T4 ...
+                                       ^
+                              first unknown position
+</code></pre>
+<p>DMTP&#39;s T2 therefore takes the role of DFlash&#39;s first unknown token. Its training accuracy can approach the original draft&#39;s T1 accuracy, rather than facing the original second-position task. Later positions can benefit similarly.</p>
+<p><strong>This changes the conditioning of parallel drafting, not just token indices.</strong> Gains still depend on training, T1 quality and inference distribution; the shift alone does not guarantee higher accuracy at every position.</p>
+<p>With similar first-token accuracy, replacing T1 alone has less room to help. <strong>Shifting remains an important source of acceptance-length improvement</strong>, and is the focus of V1.5.</p>
+<h3>Hidden information: passing the representation that predicted T1</h3>
+<p>MTP provides both a discrete T1 and the hidden state that predicted it. That representation gives DFlash extra information, separate from first-token accuracy and the known-T1 shift.</p>
+<p>Our earlier comparisons found modest gains from hidden information, with relatively small differences between injection methods. We retain a residual interface to preserve the embedding path during continued fine-tuning.</p>
+<h2 id="en-v15-1">2. Ablations: First Token, Hidden State and Shift</h2>
+<p>We progressively replace DFlash&#39;s first candidate with MTP T1 (<strong>+ MTP first token</strong>), add MTP hidden information (<strong>hidden-only</strong>), then condition drafting on a known T1 to predict T2 onward (<strong>hidden + T1</strong>).</p>
+<figure><a href="v15-shift-ablation.png" target="_blank" rel="noopener"><img src="v15-shift-ablation.png" alt="Per-verify acceptance-length ablations on Code 128K, Long-horizon 80K and MT-Bench, highlighting the known-T1 shift"></a></figure>
+
+<p><em>Figure 1. Per-verify mean acceptance length as we add MTP T1, MTP hidden information and known-T1 conditioning. Both trained variants use 60K checkpoints.</em></p>
+<div class="table-scroll" tabindex="0"><table>
+<thead>
+<tr>
+<th>Dataset</th>
+<th align="right">First-token increment</th>
+<th align="right">Hidden increment</th>
+<th align="right">T1 / shift increment</th>
+<th align="right">Shift vs. hidden-only</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Code 128K</td>
+<td align="right">+0.1283</td>
+<td align="right">+0.0378</td>
+<td align="right"><strong>+0.2662</strong></td>
+<td align="right"><strong>+5.97%</strong></td>
+</tr>
+<tr>
+<td>Long-horizon 80K</td>
+<td align="right">−0.0107</td>
+<td align="right">+0.0703</td>
+<td align="right"><strong>+0.3657</strong></td>
+<td align="right"><strong>+9.54%</strong></td>
+</tr>
+<tr>
+<td>MT-Bench Think</td>
+<td align="right">+0.1387</td>
+<td align="right">+0.0299</td>
+<td align="right"><strong>+0.2960</strong></td>
+<td align="right"><strong>+9.90%</strong></td>
+</tr>
+<tr>
+<td>MT-Bench Non-think</td>
+<td align="right">+0.1257</td>
+<td align="right">+0.0163</td>
+<td align="right"><strong>+0.2600</strong></td>
+<td align="right"><strong>+8.93%</strong></td>
+</tr>
+</tbody></table>
+</div><p><em>Increments compare adjacent variants; percentages use hidden-only as the denominator. These are per-verify acceptance lengths, not end-to-end throughput.</em></p>
+<p>Here, MTP&#39;s first-token accuracy is only <strong>1–2 percentage points higher</strong>. Substitution and hidden information give smaller gains, while <strong>shifting adds 5.97%–9.90%</strong> across all four workloads.</p>
+<p>With similar first-token accuracy, moving DFlash&#39;s continuation back to its first unknown position is an important source of DMTP&#39;s gains.</p>
+<h2 id="en-v15-2">3. From scratch and From ckpt</h2>
+<p>We tried both training from scratch and continuing from a checkpoint. Continuation offers a faster path to reusing an existing Draft.</p>
+<h3>From scratch</h3>
+<p>For Qwen3.6-27B, we freeze the Target and native MTP and train the DMTP Draft from scratch. Weights are available at <a href="https://huggingface.co/Piggy12/Qwen3.6-27B-DMTP/tree/main">Piggy12/Qwen3.6-27B-DMTP</a>.</p>
+<p>The baseline is <strong>DFlash2 with the same training configuration</strong>. Both methods enable <strong>token RS</strong>. We compare only DFlash2 and dual-anchor DMTP below, using <strong>per-verify</strong> acceptance length.</p>
+<div class="table-scroll" tabindex="0"><table>
+<thead>
+<tr>
+<th>Dataset</th>
+<th align="right">DFlash2 · token RS</th>
+<th align="right">Dual-anchor DMTP · token RS</th>
+<th align="right">Gain</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Code</td>
+<td align="right">3.9621</td>
+<td align="right"><strong>4.6022</strong></td>
+<td align="right">+16.16%</td>
+</tr>
+<tr>
+<td>Math</td>
+<td align="right">4.2909</td>
+<td align="right"><strong>4.8871</strong></td>
+<td align="right">+13.89%</td>
+</tr>
+<tr>
+<td>MT-Bench</td>
+<td align="right">4.0044</td>
+<td align="right"><strong>4.1826</strong></td>
+<td align="right">+4.45%</td>
+</tr>
+<tr>
+<td>Agent</td>
+<td align="right">3.8197</td>
+<td align="right"><strong>4.6871</strong></td>
+<td align="right"><strong>+22.71%</strong></td>
+</tr>
+<tr>
+<td>SWE</td>
+<td align="right">2.9273</td>
+<td align="right"><strong>3.9427</strong></td>
+<td align="right"><strong>+34.69%</strong></td>
+</tr>
+<tr>
+<td>Long-horizon</td>
+<td align="right">3.1929</td>
+<td align="right"><strong>4.3310</strong></td>
+<td align="right"><strong>+35.64%</strong></td>
+</tr>
+</tbody></table>
+</div><p><strong>The training data contains no Agent data, yet DMTP improves acceptance on Agent, SWE and Long-horizon.</strong> This supports reusing MTP&#39;s pretrained capabilities to strengthen DFlash2 drafting without additional Agent-specific training.</p>
+<p>These gains measure acceptance length, not task success rates.</p>
+<h3>From ckpt</h3>
+<p>We fine-tune an existing DFlash2 checkpoint on SFT data, adding two anchors and a zero-initialized T1 residual. Target and MTP remain frozen; only the Draft, selector and residual layer are updated.</p>
+<p><strong>A few thousand fine-tuning steps suffice to learn DMTP&#39;s known-T1 continuation from T2 onward, without retraining the entire Draft.</strong></p>
+<p>Below, we continue a <strong>CPT (Continued Pre-training)</strong> DFlash2 for <strong>4,000 steps</strong>. Its first-token acceptance already approaches or exceeds MTP on several tasks, yet shifting still improves continuation.</p>
+<p>Each cell lists <strong>MTP / DFlash2 CPT / DMTP4000</strong>, with DMTP in bold. Values are <strong>per-verify cumulative acceptance rates (%, excluding bonus)</strong>, not conditional acceptance rates.</p>
+<div class="table-scroll" tabindex="0"><table class="position-ablation">
+<thead>
+<tr>
+<th>Dataset</th>
+<th align="right">T1</th>
+<th align="right">T2</th>
+<th align="right">T3</th>
+<th align="right">T4</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>General</td>
+<td align="right">74.78 / 75.69 / <strong>75.15</strong></td>
+<td align="right">55.27 / 54.31 / <strong>57.90</strong></td>
+<td align="right">41.38 / 39.28 / <strong>43.99</strong></td>
+<td align="right">31.72 / 29.14 / <strong>34.07</strong></td>
+</tr>
+<tr>
+<td>Reason</td>
+<td align="right">75.72 / 75.91 / <strong>76.04</strong></td>
+<td align="right">56.45 / 52.58 / <strong>58.73</strong></td>
+<td align="right">42.00 / 35.74 / <strong>43.00</strong></td>
+<td align="right">31.50 / 24.60 / <strong>30.93</strong></td>
+</tr>
+<tr>
+<td>Agent</td>
+<td align="right">86.40 / 86.58 / <strong>85.87</strong></td>
+<td align="right">74.73 / 73.56 / <strong>75.17</strong></td>
+<td align="right">65.12 / 63.10 / <strong>65.61</strong></td>
+<td align="right">57.18 / 55.19 / <strong>57.75</strong></td>
+</tr>
+<tr>
+<td>Long-horizon</td>
+<td align="right">83.13 / 83.08 / <strong>82.87</strong></td>
+<td align="right">70.00 / 66.99 / <strong>71.35</strong></td>
+<td align="right">59.28 / 54.66 / <strong>60.92</strong></td>
+<td align="right">50.99 / 45.35 / <strong>51.96</strong></td>
+</tr>
+<tr>
+<td>SWE</td>
+<td align="right">86.63 / 88.08 / <strong>86.51</strong></td>
+<td align="right">74.61 / 74.54 / <strong>76.54</strong></td>
+<td align="right">64.64 / 62.72 / <strong>66.35</strong></td>
+<td align="right">56.03 / 53.24 / <strong>57.43</strong></td>
+</tr>
+<tr>
+<td>Search</td>
+<td align="right">80.30 / 82.83 / <strong>79.81</strong></td>
+<td align="right">62.97 / 64.08 / <strong>64.93</strong></td>
+<td align="right">49.32 / 48.40 / <strong>50.41</strong></td>
+<td align="right">38.90 / 36.71 / <strong>38.55</strong></td>
+</tr>
+</tbody></table>
+</div><div class="table-scroll" tabindex="0"><table class="position-ablation">
+<thead>
+<tr>
+<th>Dataset</th>
+<th align="right">T5</th>
+<th align="right">T6</th>
+<th align="right">T7</th>
+<th align="right">T8</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>General</td>
+<td align="right">24.86 / 22.36 / <strong>27.16</strong></td>
+<td align="right">19.61 / 17.65 / <strong>21.99</strong></td>
+<td align="right">15.53 / 14.21 / <strong>18.05</strong></td>
+<td align="right">12.22 / 11.68 / <strong>14.88</strong></td>
+</tr>
+<tr>
+<td>Reason</td>
+<td align="right">23.75 / 17.39 / <strong>22.35</strong></td>
+<td align="right">18.00 / 12.65 / <strong>16.36</strong></td>
+<td align="right">13.74 / 9.43 / <strong>12.20</strong></td>
+<td align="right">10.53 / 7.21 / <strong>9.26</strong></td>
+</tr>
+<tr>
+<td>Agent</td>
+<td align="right">50.52 / 48.88 / <strong>51.42</strong></td>
+<td align="right">44.53 / 43.91 / <strong>46.21</strong></td>
+<td align="right">39.39 / 39.73 / <strong>41.97</strong></td>
+<td align="right">34.58 / 36.21 / <strong>38.31</strong></td>
+</tr>
+<tr>
+<td>Long-horizon</td>
+<td align="right">44.08 / 38.24 / <strong>44.69</strong></td>
+<td align="right">38.03 / 32.81 / <strong>39.03</strong></td>
+<td align="right">33.00 / 28.70 / <strong>34.55</strong></td>
+<td align="right">28.76 / 25.29 / <strong>30.72</strong></td>
+</tr>
+<tr>
+<td>SWE</td>
+<td align="right">49.13 / 45.93 / <strong>49.85</strong></td>
+<td align="right">43.12 / 40.39 / <strong>44.03</strong></td>
+<td align="right">37.71 / 35.98 / <strong>39.37</strong></td>
+<td align="right">32.85 / 32.56 / <strong>35.53</strong></td>
+</tr>
+<tr>
+<td>Search</td>
+<td align="right">30.69 / 28.27 / <strong>29.67</strong></td>
+<td align="right">24.50 / 22.17 / <strong>23.36</strong></td>
+<td align="right">19.57 / 17.76 / <strong>18.80</strong></td>
+<td align="right">15.57 / 14.45 / <strong>15.25</strong></td>
+</tr>
+</tbody></table>
+</div><p><strong>From T2 onward, DMTP exceeds DFlash2 CPT at every reported position on all six workloads, and exceeds MTP at most positions.</strong> This illustrates the benefit of shifted, known-T1 continuation even when first-token performance is similar.</p>
+<h2 id="en-v15-3">4. Joint Training: Strengthening the First Token on Specialized Tasks</h2>
+<p>A frozen MTP can limit DMTP when its first-token accuracy trails a domain-trained DFlash. We therefore explore <strong>joint MTP–DFlash SFT</strong>: preserve the shifted continuation task while adapting MTP&#39;s first-token prediction to specialized data.</p>
+<p>We keep the Target backbone frozen and train MTP&#39;s first-token prediction alongside DFlash&#39;s continuation, allowing both to adapt to specialized data.</p>
+<h3>Joint Loss: Learning the First Token and Continuation</h3>
+<p>MTP predicts T1; the DFlash base head predicts T2–T8. Both match the frozen Target&#39;s full-vocabulary distribution with <strong>LogTV</strong>. The selector additionally uses teacher-to-selector KL within each position&#39;s top-16 candidate set.</p>
+<pre><code class="language-text">LogTV(p, q) = -log(max(sum_v min(p(v), q(v)), 1e-6))
+L_joint = sum_{i=1..8} w_i * LogTV(p_i, q_i)
+        + sum_{i=2..8} v_i * KL(p_i restricted to S_i || s_i)
+w_i ∝ exp(-(i-1)/4),  sum_{i=1..8} w_i = 1
+v_i ∝ exp(-(i-2)/4),  sum_{i=2..8} v_i = 1
+</code></pre>
+<p>Here p is the Target distribution, q the corresponding MTP or DFlash base-head distribution, and s the selector distribution. Both KL distributions are renormalized within candidate set S.</p>
+<p>LogTV weights decay across all eight positions. The selector retains its seven-position weighting; no T1 selector loss or extra hard-label CE is added.</p>
+<p><strong>T1 LogTV updates MTP; tail objectives update DFlash, the selector and fusion layer.</strong> The MTP hidden passed to fusion remains detached, so tail gradients do not reach MTP. The Target backbone, shared embedding and LM head remain frozen.</p>
+<p>The formula describes one valid block. The implementation aggregates with loss masks and retains existing MoE auxiliary objectives.</p>
+<figure><a href="v15-joint-position-gain.png" target="_blank" rel="noopener"><img loading="lazy" src="v15-joint-position-gain.png" alt="Position-wise cumulative acceptance gains over DFlash V2 across nine tasks, comparing frozen-MTP and jointly trained DMTP at 500 steps"></a></figure>
+
+<p><em>Figure 2. Cumulative acceptance gains over DFlash V2 (pp). Blue: frozen MTP; purple: joint training. We focus on the per-verify dashed lines; solid lines show per-request statistics.</em></p>
+<p><strong>Joint training can restore a first-token advantage.</strong> On Math500, HumanEval and MT-Bench, frozen-MTP T1 trails DFlash V2 slightly. After joint training, the per-verify T1 gain turns positive, with larger gains at several later positions too.</p>
+<h3>Terminal Bench: Adapting with RL Traces</h3>
+<p>We also perform <strong>SFT on collected Terminal Bench RL traces</strong> for terminal and agent workloads, rather than online RL. This separate comparison starts from the same CPT initialization and keeps the Target backbone unchanged.</p>
+<p>We compare Draft-only training with frozen MTP against joint MTP–Draft training. Evaluation uses 255 expanded Terminal Bench requests, rejection sampling, concurrency 32 and eight draft candidates per round.</p>
+<p>All metrics below are <strong>per-verify</strong>. Acceptance length includes the bonus token; first-token acceptance excludes it. Length gains are relative to the frozen-MTP baseline.</p>
+<div class="table-scroll" tabindex="0"><table>
+<thead>
+<tr>
+<th>Training</th>
+<th align="right">Acceptance length</th>
+<th align="right">First-token acceptance</th>
+<th align="right">Length gain</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Draft-only, frozen MTP / 750 steps</td>
+<td align="right">4.3178</td>
+<td align="right">79.80%</td>
+<td align="right">—</td>
+</tr>
+<tr>
+<td>Joint / 750 steps</td>
+<td align="right">4.4239</td>
+<td align="right">81.18%</td>
+<td align="right"><strong>+2.46%</strong></td>
+</tr>
+<tr>
+<td>Joint / 900 steps</td>
+<td align="right"><strong>4.4745</strong></td>
+<td align="right"><strong>81.45%</strong></td>
+<td align="right"><strong>+3.63%</strong></td>
+</tr>
+</tbody></table>
+</div><p><strong>At the same 750 steps, joint training adds 1.38 percentage points of first-token acceptance and 2.46% acceptance length.</strong> The 900-step result also includes 150 additional training steps relative to the baseline.</p>
+<p>These are inference acceptance statistics, not Terminal Bench task success rates.</p>
+<p><strong>Shifting strengthens continuation; joint training strengthens the specialized first token.</strong> Together, they give DMTP more pronounced acceptance gains on these specialized workloads.</p>
+<h2 id="en-v15-4">5. Future Directions</h2>
+<h3>First-token Prediction Without Native MTP Pretraining</h3>
+<p>Future target models may not include an MTP module trained during pretraining. We are exploring <strong>EAGLE + DFlash</strong>: a lightweight EAGLE-style predictor supplies the first token, followed by parallel DFlash continuation.</p>
+<p><strong>Joint CPT of the first-token module and DFlash</strong> could reduce dependence on native pretrained MTP. The goal is a lower additional training budget, without repeating target-scale pretraining.</p>
+<p>This may offer a next-generation speculative-decoding paradigm, but its effectiveness, generalization and training cost remain research questions. Key directions include:</p>
+<ul>
+<li><strong>Explaining the first-token gap.</strong> How much comes from depth, architecture, hidden-state injection, data and training objectives?</li>
+<li><strong>Reducing serial cost.</strong> How can LM-head projection, token selection and first-token execution become cheaper while preserving sampling correctness?</li>
+<li><strong>Designing joint losses.</strong> How should first-token, tail, selector and positional objectives be balanced to retain generalization and better align training with acceptance length and throughput?</li>
+</ul>
+<h3>Building with the Community</h3>
+<p>We are collaborating with the <strong>Qwen and GLM teams</strong> on DMTP adoption, and have also discussed related designs with <strong>MiniMax and other teams</strong>.</p>
+<p>Weights and inference code are open source. Architecture, joint training and inference optimization all benefit from shared community maintenance. We welcome reproductions, feedback and contributions across models and workloads.</p>
+<hr>
+<p><a href="index.html?lang=en">Previous article: DMTP V1</a></p>
+<!-- v15:en:end -->
+</article>
+<nav class="article-pagination" aria-label="Other editions"><a href="index.html" data-edition-link><span class="pagination-label"><span data-lang="zh" hidden>上一篇</span><span data-lang="en">PREVIOUS ARTICLE</span></span><strong><span aria-hidden="true">&larr; </span>DMTP</strong><span data-lang="zh" hidden>让预训练 MTP 为并行 Draft 开个好头</span><span data-lang="en">A Better First Token for Block Drafting via MTP</span></a></nav>
+<footer class="article-footer"><strong>DMTP V1.5</strong><span data-lang="zh" hidden>技术博客</span><span data-lang="en">Technical Blog</span><a data-download="zh" href="DMTP-V1.5.zh.md" download hidden>Markdown ↓</a><a data-download="en" href="DMTP-V1.5.en.md" download>Markdown ↓</a></footer>
+</div>
+<aside class="contents" aria-label="Article series">
+<p data-lang="zh" hidden>本文内容</p><p data-lang="en">ON THIS PAGE</p>
+<nav data-lang="zh" hidden><a href="#zh-v15-0">1. 三类收益</a><a href="#zh-v15-1">2. 逐级消融</a><a href="#zh-v15-2">3. 从头训练与续训</a><a href="#zh-v15-3">4. 联合训练</a><a href="#zh-v15-4">5. Future Directions</a></nav>
+<nav data-lang="en"><a href="#en-v15-0">1. Three Sources of Improvement</a><a href="#en-v15-1">2. Ablations</a><a href="#en-v15-2">3. From scratch and From ckpt</a><a href="#en-v15-3">4. Joint Training</a><a href="#en-v15-4">5. Future Directions</a></nav>
+<hr>
+<p data-lang="zh" hidden>系列文章</p><p data-lang="en">IN THIS SERIES</p>
+<nav><a href="index.html" data-edition-link>DMTP</a><a href="v1.5.html" data-edition-link aria-current="page">DMTP V1.5</a></nav>
+<div class="edition-status"><span class="status-dot"></span><span data-lang="zh" hidden>技术博客<br>2026 年 11 月</span><span data-lang="en">Technical Blog<br>November 2026</span></div>
+</aside>
+</main>
+<script src="app.js"></script>
+</body>
+</html>

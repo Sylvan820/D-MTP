@@ -2,13 +2,28 @@
 
 **Piggy Shen · October 2026 · Technical Blog**
 
+<div class="release-resources">
+<p class="release-note">Model weights and inference code are open source.</p>
+<nav class="resource-links" aria-label="Open-source weights and code">
+<a class="resource-link" href="https://huggingface.co/Piggy12/Qwen3.6-27B-DMTP" target="_blank" rel="noopener noreferrer" title="Qwen3.6-27B DMTP weights on Hugging Face"><img class="resource-icon" src="resource-model.svg" width="18" height="18" alt=""><span>HF · 3.6-27B</span></a>
+<a class="resource-link" href="https://huggingface.co/Piggy12/Qwen3.8-next-120b-dmtp" target="_blank" rel="noopener noreferrer" title="Qwen3.8-Next-120B DMTP weights on Hugging Face"><img class="resource-icon" src="resource-model.svg" width="18" height="18" alt=""><span>HF · 3.8-Next-120B</span></a>
+<a class="resource-link resource-link--primary" href="https://github.com/Sylvan820/sglang-dmtp/tree/dmtp-qsa-four-slot-20261113" target="_blank" rel="noopener noreferrer" title="DMTP QSA inference code"><img class="resource-icon" src="resource-code.svg" width="18" height="18" alt=""><span>Code</span></a>
+<a class="resource-link resource-link--primary" href="https://github.com/sgl-project/sglang/pull/50270" target="_blank" rel="noopener noreferrer" title="SGLang pull request #50270"><img class="resource-icon" src="resource-pr.svg" width="18" height="18" alt=""><span>SGLang PR</span></a>
+<a class="resource-link resource-link--primary" href="https://github.com/sgl-project/SpecForge/pull/1067" target="_blank" rel="noopener noreferrer" title="SpecForge pull request #1067"><img class="resource-icon" src="resource-pr.svg" width="18" height="18" alt=""><span>SpecForge PR</span></a>
+</nav>
+</div>
+
+> **News · November 2026**
+>
+> [**DMTP V1.5**](v1.5.html?lang=en) is now available.
+
 > **Update · November 9, 2026**
 >
-> We find that **zero-initialized residual injection performs comparably to direct fusion and is better suited to continued fine-tuning from existing DFlash weights**. We therefore adopt **two anchors with a zero-initialized residual at the first candidate's embedding slot**, retaining the original embedding while learning to incorporate MTP's predictive features.
+> **Zero-initialized residuals match direct fusion and favor continued fine-tuning.** We adopt dual anchors with a zero-initialized residual only at the T1 embedding.
 
 > **Update · November 4, 2026**
 >
-> We find that single- and dual-anchor layouts perform similarly when trained from scratch, but **the dual-anchor layout performs better when fine-tuning from existing DFlash weights**. It also achieves **higher end-to-end throughput at comparable acceptance lengths**. We will therefore adopt the dual-anchor layout for subsequent DMTP models and continue sharing updated results. The experimental results reported here remain unchanged.
+> Scratch results are similar. **Dual anchors fine-tune better and deliver higher end-to-end throughput at comparable acceptance lengths.** We adopt dual anchors; reported results remain unchanged.
 
 Speculative decoding is an important component of LLM inference infrastructure. [DFlash](https://z-lab.ai/projects/dflash/) demonstrates the potential of parallel candidate prediction, while DeepSeek has deployed [DSpark](https://arxiv.org/abs/2607.05147) in production and reported gains over MTP. Yet DFlash does not consistently outperform MTP on models with well-trained native MTP modules, such as GLM and Qwen, or on some conversation workloads. We focus on reusing MTP's first-token prediction capability.
 
