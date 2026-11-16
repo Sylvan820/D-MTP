@@ -198,7 +198,7 @@ This may offer a next-generation speculative-decoding paradigm, but its effectiv
 
 ### Building with the Community
 
-We are collaborating with the **Qwen and GLM teams** on DMTP adoption, and have also discussed related designs with **MiniMax and other teams**.
+We are collaborating with **multiple teams to bring DMTP into practice**.
 
 Weights and inference code are open source. Architecture, joint training and inference optimization all benefit from shared community maintenance. We welcome reproductions, feedback and contributions across models and workloads.
 
