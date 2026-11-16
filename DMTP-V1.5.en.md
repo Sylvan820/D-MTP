@@ -106,7 +106,18 @@ We fine-tune an existing DFlash2 checkpoint on SFT data, adding two anchors and 
 
 **A few thousand fine-tuning steps suffice to learn DMTP's known-T1 continuation from T2 onward, without retraining the entire Draft.**
 
-Below, we continue a **CPT (Continued Pre-training)** DFlash2 for **4,000 steps**. Its first-token acceptance already approaches or exceeds MTP on several tasks, yet shifting still improves continuation.
+On **Qwen3.8-Next**, we compare DMTP after **7,000 fine-tuning steps** with **open-source DFlash2**. Evaluation uses **128K input, 64K output, temperature = 1, RS enabled, and batch size = 32**. The table reports per-verify mean acceptance length and first-token acceptance rate.
+
+| Dataset | Open-source DFlash2 acceptance length | DMTP7000 acceptance length | DFlash2 first token | DMTP first token |
+| --- | ---: | ---: | ---: | ---: |
+| General | 2.5339 | **2.7944** | 61.80% | **67.40%** |
+| Reason | 2.7902 | **3.2578** | 69.46% | **77.04%** |
+| Agent | 3.8963 | **4.2819** | 76.82% | **82.10%** |
+| Long-horizon | 3.5280 | **4.0195** | 74.03% | **81.43%** |
+| SWE | 4.0989 | **4.4628** | 81.96% | **86.86%** |
+| Search | 2.9158 | **3.1454** | 63.23% | **67.62%** |
+
+In a separate experiment, we continue a **CPT (Continued Pre-training)** DFlash2 for **4,000 steps**. Its first-token acceptance already approaches or exceeds MTP on several tasks, yet shifting still improves continuation.
 
 Each cell lists **MTP / DFlash2 CPT / DMTP4000**, with DMTP in bold. Values are **per-verify cumulative acceptance rates (%, excluding bonus)**, not conditional acceptance rates.
 
@@ -129,6 +140,10 @@ Each cell lists **MTP / DFlash2 CPT / DMTP4000**, with DMTP in bold. Values are 
 | Search | 30.69 / 28.27 / **29.67** | 24.50 / 22.17 / **23.36** | 19.57 / 17.76 / **18.80** | 15.57 / 14.45 / **15.25** |
 
 **From T2 onward, DMTP exceeds DFlash2 CPT at every reported position on all six workloads, and exceeds MTP at most positions.** This illustrates the benefit of shifted, known-T1 continuation even when first-token performance is similar.
+
+### Sparse RS
+
+The inference pipeline now supports sparse RS: only top-k logits are stored for every candidate token, including T1, reducing transfer overhead in TP (Tensor Parallelism) communication. We also plan to integrate and test sparse Block Verify.
 
 ## 4. Joint Training: Strengthening the First Token on Specialized Tasks
 

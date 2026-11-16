@@ -155,7 +155,61 @@ DMTP：      A、T1 已知   → 预测 T2、T3、T4……
 </div><p><strong>训练数据不包含 Agent 数据，但 DMTP 在 Agent、SWE 与 Long-horizon 上仍有明显提升。</strong> 这支持我们复用 MTP 预训练能力的思路：不依赖额外 Agent 专项训练，也能增强 DFlash2 在这些负载上的起草与接受能力；这里的提升指接受长度，不是任务成功率。</p>
 <h3>From ckpt</h3>
 <p>我们从已有 DFlash2 checkpoint 出发，加入双 anchor 和 T1 零初始化残差，在 SFT 数据上微调。Target 与 MTP 冻结，只更新 Draft、selector 和残差层。<strong>不必重训整套 Draft，只需数千步微调，就能学习 DMTP“已知 T1、从 T2 开始预测”的移位续写能力。</strong></p>
-<p>下面从经过 <strong>CPT（Continued Pre-training）</strong> 的 DFlash2 续训 <strong>4,000 步</strong>。起点的首 token 接受率已与 MTP 接近，部分任务甚至更高，后续位置仍能从移位中获益。</p>
+<p>在 <strong>Qwen3.8-Next</strong> 上，我们将续训 <strong>7,000 步</strong>的 DMTP 与<strong>开源 DFlash2</strong> 对比。评测配置为 <strong>128K 输入、64K 输出、temperature = 1、RS 开启、batch size = 32</strong>，表中为 per-verify 平均接受长度和首 token 接受率。</p>
+<div class="table-scroll" tabindex="0"><table>
+<thead>
+<tr>
+<th>数据集</th>
+<th align="right">开源 DFlash2 接受长度</th>
+<th align="right">DMTP7000 接受长度</th>
+<th align="right">DFlash2 首 token</th>
+<th align="right">DMTP 首 token</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>General</td>
+<td align="right">2.5339</td>
+<td align="right"><strong>2.7944</strong></td>
+<td align="right">61.80%</td>
+<td align="right"><strong>67.40%</strong></td>
+</tr>
+<tr>
+<td>Reason</td>
+<td align="right">2.7902</td>
+<td align="right"><strong>3.2578</strong></td>
+<td align="right">69.46%</td>
+<td align="right"><strong>77.04%</strong></td>
+</tr>
+<tr>
+<td>Agent</td>
+<td align="right">3.8963</td>
+<td align="right"><strong>4.2819</strong></td>
+<td align="right">76.82%</td>
+<td align="right"><strong>82.10%</strong></td>
+</tr>
+<tr>
+<td>Long-horizon</td>
+<td align="right">3.5280</td>
+<td align="right"><strong>4.0195</strong></td>
+<td align="right">74.03%</td>
+<td align="right"><strong>81.43%</strong></td>
+</tr>
+<tr>
+<td>SWE</td>
+<td align="right">4.0989</td>
+<td align="right"><strong>4.4628</strong></td>
+<td align="right">81.96%</td>
+<td align="right"><strong>86.86%</strong></td>
+</tr>
+<tr>
+<td>Search</td>
+<td align="right">2.9158</td>
+<td align="right"><strong>3.1454</strong></td>
+<td align="right">63.23%</td>
+<td align="right"><strong>67.62%</strong></td>
+</tr>
+</tbody></table>
+</div><p>另一组实验从经过 <strong>CPT（Continued Pre-training）</strong> 的 DFlash2 续训 <strong>4,000 步</strong>。起点的首 token 接受率已与 MTP 接近，部分任务甚至更高，后续位置仍能从移位中获益。</p>
 <p>每格按 <strong>MTP / DFlash2 CPT / DMTP4000</strong> 排列，粗体标出 DMTP。数值为 <strong>per-verify 逐位置累计接受率（%，不含 bonus）</strong>，不是条件接受率。</p>
 <div class="table-scroll" tabindex="0"><table class="position-ablation">
 <thead>
@@ -264,6 +318,8 @@ DMTP：      A、T1 已知   → 预测 T2、T3、T4……
 </tr>
 </tbody></table>
 </div><p><strong>从 T2 开始，DMTP 在六项负载的所有后续位置上都高于 DFlash2 CPT，多数位置也高于 MTP。</strong> 这体现了移位的收益：即使首位已经相近，让 Draft 以已知 T1 开始续写，仍能改善后续起草。</p>
+<h3>稀疏 RS</h3>
+<p>推理链路已支持稀疏 RS：所有候选 token（包括 T1）均只保存 top-k logits，减少 TP（Tensor Parallelism）通信中的传输开销。后续我们还会接入并测试稀疏 Block Verify。</p>
 <h2 id="zh-v15-3">4. 联合训练：进一步提升专项任务的首位能力</h2>
 <p>如果原生 MTP 在某个 domain 的首位 accuracy 不如专门训练的 DFlash，只依靠冻结 MTP 就会限制 DMTP 的收益。为此，我们进一步尝试 <strong>MTP 与 DFlash 联合 SFT</strong>：保留移位收益，同时让 MTP 的首位预测也适应专项数据。</p>
 <p>我们保持 Target 主干冻结，同时训练 MTP 的首位预测与 DFlash 的后续起草，让两者共同适应专项数据。</p>
@@ -471,7 +527,61 @@ DMTP:           A, T1 known  -&gt; predict T2, T3, T4 ...
 <h3>From ckpt</h3>
 <p>We fine-tune an existing DFlash2 checkpoint on SFT data, adding two anchors and a zero-initialized T1 residual. Target and MTP remain frozen; only the Draft, selector and residual layer are updated.</p>
 <p><strong>A few thousand fine-tuning steps suffice to learn DMTP&#39;s known-T1 continuation from T2 onward, without retraining the entire Draft.</strong></p>
-<p>Below, we continue a <strong>CPT (Continued Pre-training)</strong> DFlash2 for <strong>4,000 steps</strong>. Its first-token acceptance already approaches or exceeds MTP on several tasks, yet shifting still improves continuation.</p>
+<p>On <strong>Qwen3.8-Next</strong>, we compare DMTP after <strong>7,000 fine-tuning steps</strong> with <strong>open-source DFlash2</strong>. Evaluation uses <strong>128K input, 64K output, temperature = 1, RS enabled, and batch size = 32</strong>. The table reports per-verify mean acceptance length and first-token acceptance rate.</p>
+<div class="table-scroll" tabindex="0"><table>
+<thead>
+<tr>
+<th>Dataset</th>
+<th align="right">Open-source DFlash2 acceptance length</th>
+<th align="right">DMTP7000 acceptance length</th>
+<th align="right">DFlash2 first token</th>
+<th align="right">DMTP first token</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>General</td>
+<td align="right">2.5339</td>
+<td align="right"><strong>2.7944</strong></td>
+<td align="right">61.80%</td>
+<td align="right"><strong>67.40%</strong></td>
+</tr>
+<tr>
+<td>Reason</td>
+<td align="right">2.7902</td>
+<td align="right"><strong>3.2578</strong></td>
+<td align="right">69.46%</td>
+<td align="right"><strong>77.04%</strong></td>
+</tr>
+<tr>
+<td>Agent</td>
+<td align="right">3.8963</td>
+<td align="right"><strong>4.2819</strong></td>
+<td align="right">76.82%</td>
+<td align="right"><strong>82.10%</strong></td>
+</tr>
+<tr>
+<td>Long-horizon</td>
+<td align="right">3.5280</td>
+<td align="right"><strong>4.0195</strong></td>
+<td align="right">74.03%</td>
+<td align="right"><strong>81.43%</strong></td>
+</tr>
+<tr>
+<td>SWE</td>
+<td align="right">4.0989</td>
+<td align="right"><strong>4.4628</strong></td>
+<td align="right">81.96%</td>
+<td align="right"><strong>86.86%</strong></td>
+</tr>
+<tr>
+<td>Search</td>
+<td align="right">2.9158</td>
+<td align="right"><strong>3.1454</strong></td>
+<td align="right">63.23%</td>
+<td align="right"><strong>67.62%</strong></td>
+</tr>
+</tbody></table>
+</div><p>In a separate experiment, we continue a <strong>CPT (Continued Pre-training)</strong> DFlash2 for <strong>4,000 steps</strong>. Its first-token acceptance already approaches or exceeds MTP on several tasks, yet shifting still improves continuation.</p>
 <p>Each cell lists <strong>MTP / DFlash2 CPT / DMTP4000</strong>, with DMTP in bold. Values are <strong>per-verify cumulative acceptance rates (%, excluding bonus)</strong>, not conditional acceptance rates.</p>
 <div class="table-scroll" tabindex="0"><table class="position-ablation">
 <thead>
@@ -580,6 +690,8 @@ DMTP:           A, T1 known  -&gt; predict T2, T3, T4 ...
 </tr>
 </tbody></table>
 </div><p><strong>From T2 onward, DMTP exceeds DFlash2 CPT at every reported position on all six workloads, and exceeds MTP at most positions.</strong> This illustrates the benefit of shifted, known-T1 continuation even when first-token performance is similar.</p>
+<h3>Sparse RS</h3>
+<p>The inference pipeline now supports sparse RS: only top-k logits are stored for every candidate token, including T1, reducing transfer overhead in TP (Tensor Parallelism) communication. We also plan to integrate and test sparse Block Verify.</p>
 <h2 id="en-v15-3">4. Joint Training: Strengthening the First Token on Specialized Tasks</h2>
 <p>A frozen MTP can limit DMTP when its first-token accuracy trails a domain-trained DFlash. We therefore explore <strong>joint MTP–DFlash SFT</strong>: preserve the shifted continuation task while adapting MTP&#39;s first-token prediction to specialized data.</p>
 <p>We keep the Target backbone frozen and train MTP&#39;s first-token prediction alongside DFlash&#39;s continuation, allowing both to adapt to specialized data.</p>
