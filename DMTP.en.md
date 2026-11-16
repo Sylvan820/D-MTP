@@ -431,7 +431,7 @@ Contact: [riven@zju.edu.cn](mailto:riven@zju.edu.cn).
 
 We thank the **Qwen Team, the Domino Team, the Qwen Application Team, and the SpecForge Team** for their support and discussions. This work was carried out during my **internship with the Qwen Infra team**.
 
-**Qwen Team**: Yuhao Shen, Di Liu, Yucheng Li, Hao Yu, Yang Xu, Xi Lin, Yi Zhang.
+**Qwen Team**: Yuhao Shen, Di Liu, Yucheng Li, Hao Yu, Xin Wang, Yang Xu, Xi Lin, Yi Zhang.
 
 **Domino Team**: Jianuo Huang.
 
