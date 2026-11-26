@@ -13,9 +13,9 @@ November 2026 · Technical Blog
 </nav>
 </div>
 
-In [DMTP V1](index.html?lang=en), we discussed three sources of improvement over DFlash: MTP's first-token capability, shifting parallel drafting after a known T1, and the extra information in MTP hidden states.
+In [DMTP V1](index.html?lang=en), we focused on DFlash's first-token accuracy and OOD generalization. [Domino](https://arxiv.org/abs/2605.29707), [DSpark](https://arxiv.org/abs/2607.05147), and [DFlash2](https://inco.ai/blog/dflash2/) primarily improve intra-block dependencies and later-position accuracy decay. Strengthening the first token and its generalization beyond draft-training domains remains a complementary, underexplored problem.
 
-V1.5 separates these effects, focusing on **the gain from shifting the draft**, which can be obscured by a stronger first token.
+Native MTP offers pretrained first-token capabilities, but a multi-step rollout adds sequential latency. **Can we reuse MTP for a stronger first candidate and let DFlash continue in parallel?** DMTP does so through T1 and its hidden state. V1.5 separates these effects, focusing on **the gain from shifting the draft**, even when first-token accuracies are similar. This cooperation complements block-internal improvements, as demonstrated with DFlash and DFlash2.
 
 **Even with similar first-token accuracy, DMTP can benefit: MTP proposes T1, so DFlash starts at T2 and predicts continuation tokens one position closer to its known prefix.**
 
@@ -58,7 +58,7 @@ Our earlier comparisons found modest gains from hidden information, with relativ
 
 ## 2. Ablations: First Token, Hidden State and Shift
 
-We progressively replace DFlash's first candidate with MTP T1 (**+ MTP first token**), add MTP hidden information (**hidden-only**), then condition drafting on a known T1 to predict T2 onward (**hidden + T1**).
+To distinguish the first-token advantage from the shift itself, we progressively replace DFlash's first candidate with MTP T1 (**+ MTP first token**), add MTP hidden information (**hidden-only**), then condition drafting on a known T1 to predict T2 onward (**hidden + T1**). The comparison asks whether shifting helps when a stronger first token alone offers little gain.
 
 <figure><a href="v15-shift-ablation.png" target="_blank" rel="noopener"><img src="v15-shift-ablation.png" alt="Per-verify acceptance-length ablations on Code 128K, Long-horizon 80K and MT-Bench, highlighting the known-T1 shift"></a></figure>
 
