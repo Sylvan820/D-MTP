@@ -407,13 +407,16 @@ DMTP 仍是一次初步探索。我们将继续分享更多模型与场景下的
 
 ## 引用
 
-如果这项工作对你有帮助，欢迎引用这篇技术博客：
+如果这项工作对你有帮助，欢迎引用我们的论文：
 
 ```bibtex
 @misc{shen2026dmtp,
-  author = {Shen, Yuhao and Huang, Jianuo},
+  author = {Shen, Yuhao and Huang, Jianuo and Zhang, Yi and Yang, Xu and
+            Yu, Hao and Wang, Xin and Li, Yucheng and Jiang, Huiqiang and
+            Lin, Xi and Liu, Di and Zhang, Jun and Liu, Tianyu and
+            Zheng, Bo and Liu, Dayiheng and Zhang, Jianwei and Wang, Cong},
   title  = {{DMTP}: A Better First Token for Block Drafting via MTP},
   year   = {2026},
-  note   = {Technical blog}
+  url    = {https://sylvan820.github.io/D-MTP/}
 }
 ```

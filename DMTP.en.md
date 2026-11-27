@@ -409,13 +409,16 @@ We thank the **Qwen Team, the Domino Team, the Qwen Application Team, and the Sp
 
 ## Citation
 
-If you find this work useful, please consider citing this technical blog:
+If you find this work useful, please consider citing our paper:
 
 ```bibtex
 @misc{shen2026dmtp,
-  author = {Shen, Yuhao and Huang, Jianuo},
+  author = {Shen, Yuhao and Huang, Jianuo and Zhang, Yi and Yang, Xu and
+            Yu, Hao and Wang, Xin and Li, Yucheng and Jiang, Huiqiang and
+            Lin, Xi and Liu, Di and Zhang, Jun and Liu, Tianyu and
+            Zheng, Bo and Liu, Dayiheng and Zhang, Jianwei and Wang, Cong},
   title  = {{DMTP}: A Better First Token for Block Drafting via MTP},
   year   = {2026},
-  note   = {Technical blog}
+  url    = {https://sylvan820.github.io/D-MTP/}
 }
 ```
