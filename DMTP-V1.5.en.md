@@ -58,16 +58,16 @@ Our earlier comparisons found modest gains from hidden information, with relativ
 
 ## 2. Ablations: First Token, Hidden State and Shift
 
-We progressively replace DFlash's first candidate with MTP T1 (**+ MTP first token**), add MTP hidden information (**hidden-only**), then condition drafting on a known T1 to predict T2 onward (**hidden + T1**).
+On **Qwen3.7-Turbo**, we progressively replace DFlash's first candidate with MTP T1 (**+ MTP first token**), add MTP hidden information (**hidden-only**), then condition drafting on a known T1 to predict T2 onward (**hidden + T1**).
 
-<figure><a href="v15-shift-ablation.png" target="_blank" rel="noopener"><img src="v15-shift-ablation.png" alt="Per-verify acceptance-length ablations on Code 128K, Long-horizon 80K and MT-Bench, highlighting the known-T1 shift"></a></figure>
+<figure><a href="paper-shift-motivation.png" target="_blank" rel="noopener"><img src="paper-shift-motivation.png" alt="Per-verify acceptance-length ablations on Code, Long-horizon and MT-Bench, highlighting the known-T1 shift"></a></figure>
 
 *Figure 1. Per-verify mean acceptance length as we add MTP T1, MTP hidden information and known-T1 conditioning. Both trained variants use 60K checkpoints.*
 
 | Dataset | First-token increment | Hidden increment | T1 / shift increment | Shift vs. hidden-only |
 | --- | ---: | ---: | ---: | ---: |
-| Code 128K | +0.1283 | +0.0378 | **+0.2662** | **+5.97%** |
-| Long-horizon 80K | −0.0107 | +0.0703 | **+0.3657** | **+9.54%** |
+| Code | +0.1283 | +0.0378 | **+0.2662** | **+5.97%** |
+| Long-horizon | −0.0107 | +0.0703 | **+0.3657** | **+9.54%** |
 | MT-Bench Think | +0.1387 | +0.0299 | **+0.2960** | **+9.90%** |
 | MT-Bench Non-think | +0.1257 | +0.0163 | **+0.2600** | **+8.93%** |
 
@@ -85,20 +85,35 @@ We tried both training from scratch and continuing from a checkpoint. Continuati
 
 For Qwen3.6-27B, we freeze the Target and native MTP and train the DMTP Draft from scratch. Weights are available at [Piggy12/Qwen3.6-27B-DMTP](https://huggingface.co/Piggy12/Qwen3.6-27B-DMTP/tree/main).
 
-The baseline is **DFlash2 with the same training configuration**. Both methods enable **token RS**. We compare only DFlash2 and dual-anchor DMTP below, using **per-verify** acceptance length.
+The baseline is **DFlash2 with the same training configuration**. Both drafters train for three epochs on regenerated OpenPerfectBlend with a 3K training sequence limit and no Agent data. Evaluation enables **thinking and exact RS**, at temperature 1.0 with 128K input and 64K output limits. Accepted length is **per-verify**, including correction/bonus; Native MTP is the four-step reference.
 
-| Dataset | DFlash2 · token RS | Dual-anchor DMTP · token RS | Gain |
-| --- | ---: | ---: | ---: |
-| Code | 3.9621 | **4.6022** | +16.16% |
-| Math | 4.2909 | **4.8871** | +13.89% |
-| MT-Bench | 4.0044 | **4.1826** | +4.45% |
-| Agent | 3.8197 | **4.6871** | **+22.71%** |
-| SWE | 2.9273 | **3.9427** | **+34.69%** |
-| Long-horizon | 3.1929 | **4.3310** | **+35.64%** |
+| Dataset | Native MTP | DFlash2 | DMTP |
+| --- | --- | --- | --- |
+| Code | 3.5697 | 3.9621 | **4.6022** |
+| Math | 3.6913 | 4.2909 | **4.8871** |
+| MT-Bench | 3.1467 | 4.0044 | **4.1826** |
+| Agent | 4.1280 | 3.8197 | **4.6871** |
+| SWE | 3.2583 | 2.9273 | **3.9427** |
+| Long-horizon | 3.7297 | 3.1929 | **4.3310** |
+| General | 3.2227 | 3.3412 | **3.7736** |
+| Reason | 3.5974 | 4.1282 | **4.7106** |
+| Search | 3.1624 | 3.4653 | **4.0437** |
 
 **The training data contains no Agent data, yet DMTP improves acceptance on Agent, SWE and Long-horizon.** This supports reusing MTP's pretrained capabilities to strengthen DFlash2 drafting without additional Agent-specific training.
 
 These gains measure acceptance length, not task success rates.
+
+Short-context evaluation uses a 4K input limit, 1,024 output tokens, temperature 1.0, TP4, batch size 32, and natural EOS; MT-Bench uses two turns. Under the same regenerated-OPB setup:
+
+| Dataset | Native MTP | DFlash2 | DMTP |
+| --- | --- | --- | --- |
+| GSM8K | 3.9737 | 5.8619 | **5.9383** |
+| MATH500 | 3.9968 | 5.7963 | **5.9702** |
+| HumanEval | 3.6617 | 5.1567 | **5.3305** |
+| MT-Bench | 3.2994 | 4.4048 | **4.4654** |
+| Alpaca | 3.2405 | 4.2018 | **4.3257** |
+
+Short-context math and code are closer to the training data, so DFlash2 is already strong and the margin is smaller. On Agent, SWE, and Long-horizon, which are absent from draft training, reusing pretrained MTP yields wider generalization gains.
 
 ### From ckpt
 
@@ -106,18 +121,30 @@ We fine-tune an existing DFlash2 checkpoint on SFT data, adding two anchors and 
 
 **A few thousand fine-tuning steps suffice to learn DMTP's known-T1 continuation from T2 onward, without retraining the entire Draft.**
 
-On **Qwen3.8-Next**, we compare DMTP after **7,000 fine-tuning steps** with **open-source DFlash2**. Evaluation uses **128K input, 64K output, temperature = 1, RS enabled, and batch size = 32**. The table reports per-verify mean acceptance length and first-token acceptance rate.
+On **Qwen3.8-Next**, DMTP and DFlash2 start from existing checkpoints and use the same SFT data and fine-tuning budget. Evaluation uses **128K input and 64K output limits, temperature 1.0, exact RS, and batch size 32**. We report per-verify accepted length below, followed by first-token acceptance on six long-context workloads.
 
-| Dataset | Open-source DFlash2 acceptance length | DMTP7000 acceptance length | DFlash2 first token | DMTP first token |
-| --- | ---: | ---: | ---: | ---: |
-| General | 2.5339 | **2.7944** | 61.80% | **67.40%** |
-| Reason | 2.7902 | **3.2578** | 69.46% | **77.04%** |
-| Agent | 3.8963 | **4.2819** | 76.82% | **82.10%** |
-| Long-horizon | 3.5280 | **4.0195** | 74.03% | **81.43%** |
-| SWE | 4.0989 | **4.4628** | 81.96% | **86.86%** |
-| Search | 2.9158 | **3.1454** | 63.23% | **67.62%** |
+| Dataset | Native MTP | DFlash2 | DMTP |
+| --- | --- | --- | --- |
+| Code | 3.0136 | 2.8793 | **3.2858** |
+| Math | 3.0916 | 2.9534 | **3.3600** |
+| MT-Bench | 2.9210 | 2.8380 | **2.9879** |
+| Agent | 3.7712 | 3.8963 | **4.2819** |
+| SWE | 3.7817 | 4.0989 | **4.4628** |
+| Long-horizon | 3.5106 | 3.5280 | **4.0195** |
+| General | **2.8158** | 2.5339 | 2.7944 |
+| Reason | 2.9740 | 2.7902 | **3.2578** |
+| Search | **3.2090** | 2.9158 | 3.1454 |
 
-In a separate experiment, we continue a **CPT (Continued Pre-training)** DFlash2 for **4,000 steps**. Its first-token acceptance already approaches or exceeds MTP on several tasks, yet shifting still improves continuation.
+| Dataset | DFlash2 first token | DMTP first token |
+| --- | --- | --- |
+| General | 61.80% | 67.40% |
+| Reason | 69.46% | 77.04% |
+| Agent | 76.82% | 82.10% |
+| Long-horizon | 74.03% | 81.43% |
+| SWE | 81.96% | 86.86% |
+| Search | 63.23% | 67.62% |
+
+A separate K=8 experiment starts from a **CPT (Continued Pre-training)** DFlash2 checkpoint. DMTP and the DFlash2 baseline use matched fine-tuning budgets on the same 128K SFT data; DMTP is reported at **4,000 steps**. Its first-token acceptance already approaches or exceeds MTP on several tasks, yet shifting still improves continuation.
 
 Each cell lists **MTP / DFlash2 CPT / DMTP4000**, with DMTP in bold. Values are **per-verify cumulative acceptance rates (%, excluding bonus)**, not conditional acceptance rates.
 
@@ -163,6 +190,8 @@ w_i ∝ exp(-(i-1)/4),  sum_{i=1..8} w_i = 1
 v_i ∝ exp(-(i-2)/4),  sum_{i=2..8} v_i = 1
 ```
 
+At inference, continuation candidates are sampled from the conditional selector distribution using predecessor-token information, not directly from the base-head distribution used in LogTV.
+
 Here p is the Target distribution, q the corresponding MTP or DFlash base-head distribution, and s the selector distribution. Both KL distributions are renormalized within candidate set S.
 
 LogTV weights decay across all eight positions. The selector retains its seven-position weighting; no T1 selector loss or extra hard-label CE is added.
@@ -171,13 +200,17 @@ LogTV weights decay across all eight positions. The selector retains its seven-p
 
 The formula describes one valid block. The implementation aggregates with loss masks and retains existing MoE auxiliary objectives.
 
-<figure><a href="v15-joint-position-gain.png" target="_blank" rel="noopener"><img loading="lazy" src="v15-joint-position-gain.png" alt="Position-wise cumulative acceptance gains over DFlash V2 across nine tasks, comparing frozen-MTP and jointly trained DMTP at 500 steps"></a></figure>
+<figure><a href="paper-v15-joint-position-gain.png" target="_blank" rel="noopener"><img loading="lazy" src="paper-v15-joint-position-gain.png" alt="Position-wise cumulative acceptance gains over DFlash V2 across nine tasks, comparing frozen-MTP and jointly trained DMTP at 500 steps"></a></figure>
 
 *Figure 2. Cumulative acceptance gains over DFlash V2 (pp). Blue: frozen MTP; purple: joint training. We focus on the per-verify dashed lines; solid lines show per-request statistics.*
 
 **Joint training can restore a first-token advantage.** On Math500, HumanEval and MT-Bench, frozen-MTP T1 trails DFlash V2 slightly. After joint training, the per-verify T1 gain turns positive, with larger gains at several later positions too.
 
 ### Terminal Bench: Adapting with RL Traces
+
+![Terminal Bench joint-training results from the paper](paper-joint-training-summary.png)
+
+*Figure 3. At a matched training budget, joint training improves first-token acceptance, accepted length, and cumulative acceptance across the block.*
 
 We also perform **SFT on collected Terminal Bench RL traces** for terminal and agent workloads, rather than online RL. This separate comparison starts from the same CPT initialization and keeps the Target backbone unchanged.
 

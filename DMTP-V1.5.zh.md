@@ -54,16 +54,16 @@ DMTP：      A、T1 已知   → 预测 T2、T3、T4……
 
 ## 2. 逐级消融：首位、hidden 与移位
 
-我们从 DFlash 逐步加入三项改动：**DFlash + MTP 首位**只替换第一个候选，观察首位收益；**hidden-only**在此基础上加入 MTP hidden；**hidden + T1**再将 T1 作为已知输入，让 DFlash 从 T2 开始预测，观察移位收益。
+在 **Qwen3.7-Turbo** 上，我们从 DFlash 逐步加入三项改动：**DFlash + MTP 首位**只替换第一个候选，观察首位收益；**hidden-only**在此基础上加入 MTP hidden；**hidden + T1**再将 T1 作为已知输入，让 DFlash 从 T2 开始预测，观察移位收益。
 
-<figure><a href="v15-shift-ablation.png" target="_blank" rel="noopener"><img src="v15-shift-ablation.png" alt="Code 128K、Long-horizon 80K 和 MT-Bench 上的 per-verify 接受长度消融，突出 hidden-only 到 hidden + T1 的移位收益"></a></figure>
+<figure><a href="paper-shift-motivation.png" target="_blank" rel="noopener"><img src="paper-shift-motivation.png" alt="Code、Long-horizon 和 MT-Bench 上的 per-verify 接受长度消融，突出 hidden-only 到 hidden + T1 的移位收益"></a></figure>
 
 *图 1：per-verify 平均接受长度。四种方法逐步加入 MTP 首位、MTP hidden 和已知 T1；两种训练变体均使用 60K checkpoint。*
 
 | 数据集 | 仅换首位的增量 | 加 hidden 的增量 | 加 T1 / 移位的增量 | 移位相对 Hidden-only |
 | --- | ---: | ---: | ---: | ---: |
-| Code 128K | +0.1283 | +0.0378 | **+0.2662** | **+5.97%** |
-| Long-horizon 80K | −0.0107 | +0.0703 | **+0.3657** | **+9.54%** |
+| Code | +0.1283 | +0.0378 | **+0.2662** | **+5.97%** |
+| Long-horizon | −0.0107 | +0.0703 | **+0.3657** | **+9.54%** |
 | MT-Bench Think | +0.1387 | +0.0299 | **+0.2960** | **+9.90%** |
 | MT-Bench Non-think | +0.1257 | +0.0163 | **+0.2600** | **+8.93%** |
 
@@ -79,35 +79,62 @@ DMTP：      A、T1 已知   → 预测 T2、T3、T4……
 
 在 Qwen3.6-27B 上，我们冻结 Target 与 MTP，从头训练 DMTP Draft。权重见 [Piggy12/Qwen3.6-27B-DMTP](https://huggingface.co/Piggy12/Qwen3.6-27B-DMTP/tree/main)。
 
-Baseline 为**相同训练配置的 DFlash2**，两组均开启 **token RS**。下面只比较 DFlash2 与双 anchor DMTP，接受长度采用 **per-verify** 口径。
+Baseline 为**相同训练配置的 DFlash2**。两组均在 regenerated OpenPerfectBlend 上训练三个 epoch，训练序列最长 3K，不含 Agent 数据。评测开启 **thinking 与精确 RS**，温度 1.0，长文输入上限 128K、输出上限 64K。接受长度采用 **per-verify**，含修正/bonus；Native MTP 为四步参考。
 
-| 数据集 | DFlash2 · token RS | 双 anchor DMTP · token RS | 提升 |
-| --- | ---: | ---: | ---: |
-| Code | 3.9621 | **4.6022** | +16.16% |
-| Math | 4.2909 | **4.8871** | +13.89% |
-| MT-Bench | 4.0044 | **4.1826** | +4.45% |
-| Agent | 3.8197 | **4.6871** | **+22.71%** |
-| SWE | 2.9273 | **3.9427** | **+34.69%** |
-| Long-horizon | 3.1929 | **4.3310** | **+35.64%** |
+| 数据集 | Native MTP | DFlash2 | DMTP |
+| --- | --- | --- | --- |
+| Code | 3.5697 | 3.9621 | **4.6022** |
+| Math | 3.6913 | 4.2909 | **4.8871** |
+| MT-Bench | 3.1467 | 4.0044 | **4.1826** |
+| Agent | 4.1280 | 3.8197 | **4.6871** |
+| SWE | 3.2583 | 2.9273 | **3.9427** |
+| Long-horizon | 3.7297 | 3.1929 | **4.3310** |
+| General | 3.2227 | 3.3412 | **3.7736** |
+| Reason | 3.5974 | 4.1282 | **4.7106** |
+| Search | 3.1624 | 3.4653 | **4.0437** |
 
 **训练数据不包含 Agent 数据，但 DMTP 在 Agent、SWE 与 Long-horizon 上仍有明显提升。** 这支持我们复用 MTP 预训练能力的思路：不依赖额外 Agent 专项训练，也能增强 DFlash2 在这些负载上的起草与接受能力；这里的提升指接受长度，不是任务成功率。
+
+短文评测使用 4K 输入、1,024 输出、温度 1.0、TP4、batch 32，保留自然 EOS；MT-Bench 为双轮会话。同一 regenerated OPB 设置下，结果如下：
+
+| 数据集 | Native MTP | DFlash2 | DMTP |
+| --- | --- | --- | --- |
+| GSM8K | 3.9737 | 5.8619 | **5.9383** |
+| MATH500 | 3.9968 | 5.7963 | **5.9702** |
+| HumanEval | 3.6617 | 5.1567 | **5.3305** |
+| MT-Bench | 3.2994 | 4.4048 | **4.4654** |
+| Alpaca | 3.2405 | 4.2018 | **4.3257** |
+
+短文数学与代码更贴近训练数据，DFlash2 的基线已较强，因此增益较小；未参与 Draft 训练的 Agent、SWE 和 Long-horizon 上，MTP 的预训练能力带来更明显的泛化收益。
 
 ### From ckpt
 
 我们从已有 DFlash2 checkpoint 出发，加入双 anchor 和 T1 零初始化残差，在 SFT 数据上微调。Target 与 MTP 冻结，只更新 Draft、selector 和残差层。**不必重训整套 Draft，只需数千步微调，就能学习 DMTP“已知 T1、从 T2 开始预测”的移位续写能力。**
 
-在 **Qwen3.8-Next** 上，我们将续训 **7,000 步**的 DMTP 与**开源 DFlash2** 对比。评测配置为 **128K 输入、64K 输出、temperature = 1、RS 开启、batch size = 32**，表中为 per-verify 平均接受长度和首 token 接受率。
+在 **Qwen3.8-Next** 上，DMTP 与 DFlash2 从已有 checkpoint 出发，在相同 SFT 数据上使用相同微调预算。评测使用 **128K 输入上限、64K 输出上限、温度 1.0、精确 RS、batch 32**。下表列出 per-verify 接受长度，随后给出六项长文负载的首 token 接受率。
 
-| 数据集 | 开源 DFlash2 接受长度 | DMTP7000 接受长度 | DFlash2 首 token | DMTP 首 token |
-| --- | ---: | ---: | ---: | ---: |
-| General | 2.5339 | **2.7944** | 61.80% | **67.40%** |
-| Reason | 2.7902 | **3.2578** | 69.46% | **77.04%** |
-| Agent | 3.8963 | **4.2819** | 76.82% | **82.10%** |
-| Long-horizon | 3.5280 | **4.0195** | 74.03% | **81.43%** |
-| SWE | 4.0989 | **4.4628** | 81.96% | **86.86%** |
-| Search | 2.9158 | **3.1454** | 63.23% | **67.62%** |
+| 数据集 | Native MTP | DFlash2 | DMTP |
+| --- | --- | --- | --- |
+| Code | 3.0136 | 2.8793 | **3.2858** |
+| Math | 3.0916 | 2.9534 | **3.3600** |
+| MT-Bench | 2.9210 | 2.8380 | **2.9879** |
+| Agent | 3.7712 | 3.8963 | **4.2819** |
+| SWE | 3.7817 | 4.0989 | **4.4628** |
+| Long-horizon | 3.5106 | 3.5280 | **4.0195** |
+| General | **2.8158** | 2.5339 | 2.7944 |
+| Reason | 2.9740 | 2.7902 | **3.2578** |
+| Search | **3.2090** | 2.9158 | 3.1454 |
 
-另一组实验从经过 **CPT（Continued Pre-training）** 的 DFlash2 续训 **4,000 步**。起点的首 token 接受率已与 MTP 接近，部分任务甚至更高，后续位置仍能从移位中获益。
+| 数据集 | DFlash2 首 token | DMTP 首 token |
+| --- | --- | --- |
+| General | 61.80% | 67.40% |
+| Reason | 69.46% | 77.04% |
+| Agent | 76.82% | 82.10% |
+| Long-horizon | 74.03% | 81.43% |
+| SWE | 81.96% | 86.86% |
+| Search | 63.23% | 67.62% |
+
+另一组 K=8 实验从经过 **CPT（Continued Pre-training）** 的 DFlash2 出发，DMTP 与 DFlash2 基线在相同 128K SFT 数据上使用匹配的微调预算，DMTP 取 **4,000 步**结果。起点的首 token 接受率已与 MTP 接近，部分任务甚至更高，后续位置仍能从移位中获益。
 
 每格按 **MTP / DFlash2 CPT / DMTP4000** 排列，粗体标出 DMTP。数值为 **per-verify 逐位置累计接受率（%，不含 bonus）**，不是条件接受率。
 
@@ -153,17 +180,23 @@ w_i ∝ exp(-(i-1)/4),  sum_{i=1..8} w_i = 1
 v_i ∝ exp(-(i-2)/4),  sum_{i=2..8} v_i = 1
 ```
 
+推理时，后续候选由结合前驱 token 信息的条件 selector 分布采样，而非直接使用 LogTV 中的基础头分布。
+
 其中 p 为 Target 分布，q 为对应位置的 MTP 或 DFlash 基础头分布，s 为 selector 分布；KL 两侧都在候选集 S 内重新归一化。首位与尾部 LogTV 使用统一的八位置衰减，selector 保留原七位置权重，不额外给 T1 加 selector loss 或 hard-label CE。
 
 **MTP 由 T1 LogTV 更新，DFlash、selector 与融合层由尾部目标更新。** 供融合使用的 MTP hidden 仍然 detach，尾部梯度不回传 MTP；Target 主干、共享 embedding 和 LM head 冻结。上式表示单个有效 block 的目标，实际还按 loss mask 汇总，并保留原有 MoE 辅助项。
 
-<figure><a href="v15-joint-position-gain.png" target="_blank" rel="noopener"><img loading="lazy" src="v15-joint-position-gain.png" alt="九项任务上相对 DFlash V2 的逐位置累计接受率增益，比较 500 步冻结 MTP 与联合训练的 DMTP"></a></figure>
+<figure><a href="paper-v15-joint-position-gain.png" target="_blank" rel="noopener"><img loading="lazy" src="paper-v15-joint-position-gain.png" alt="九项任务上相对 DFlash V2 的逐位置累计接受率增益，比较 500 步冻结 MTP 与联合训练的 DMTP"></a></figure>
 
 *图 2：相对 DFlash V2 的逐位置累计接受率增益（pp）。蓝色为冻结 MTP，紫色为联合训练；本文关注 per-verify 虚线，原图实线为 per-request。*
 
 **联合训练后，首位优势可以重新建立。** 在 Math500、HumanEval 和 MT-Bench 上，冻结 MTP 时 T1 略低于 DFlash V2；联合训练后，per-verify 的 T1 增益转为正值，后续多个位置也得到更明显的改善。
 
 ### Terminal Bench：RL trace 专项适配
+
+![论文中的 Terminal Bench 联合训练实验](paper-joint-training-summary.png)
+
+*图 3：匹配训练预算下，联合训练提高首位接受率、接受长度及各位置的累计接受率。*
 
 我们还用已采集的 **Terminal Bench RL trace 做 SFT**，进一步适配终端与 agent 场景，而不是在线运行 RL。下面是另一组同一 CPT 初始化、Target 主干不变的对照：冻结 MTP，仅训练 Draft，与同时更新 MTP 的联合训练比较。
 
