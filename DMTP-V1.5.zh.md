@@ -13,7 +13,7 @@
 </nav>
 </div>
 
-在 [DMTP V1](index.html?lang=zh) 中，我们关注 DFlash 的首 token 准确率与 OOD 泛化问题。[Domino](https://arxiv.org/abs/2605.29707)、[DSpark](https://arxiv.org/abs/2607.05147) 和 [DFlash2](https://inco.ai/blog/dflash2/) 主要改善块内依赖和后续位置衰减，而首 token 本身的准确率与跨域泛化仍缺少充分关注。这促使我们转向具备预训练首位能力、但多步起草存在串行开销的原生 MTP。**能否让 MTP 提供更强的首候选，再由 DFlash 并行续写？** DMTP 通过 T1 及其 hidden 复用 MTP 的能力，V1.5 则进一步区分首位、hidden 和**移位**三类收益。这种协作方式与块内改进正交，已在 DFlash 和 DFlash2 上验证。
+在 [DMTP V1](index.html?lang=zh) 中，我们讨论了 DMTP 相比 DFlash 的三类收益：MTP 的首位预测能力、给定 T1 后并行起草的移位，以及 MTP hidden 提供的额外信息。V1.5 进一步拆开这三件事，尤其是容易被首位优势掩盖的**移位收益**。
 
 **即使 MTP 与 DFlash 的首 token accuracy 接近，DMTP 仍能受益：让 MTP 负责 T1，DFlash 就从 T2 开始，把后续候选的预测距离缩短一个位置。**
 
@@ -54,7 +54,7 @@ DMTP：      A、T1 已知   → 预测 T2、T3、T4……
 
 ## 2. 逐级消融：首位、hidden 与移位
 
-为区分首位优势与移位本身的收益，我们从 DFlash 逐步加入三项改动：**DFlash + MTP 首位**只替换第一个候选，观察首位收益；**hidden-only**在此基础上加入 MTP hidden；**hidden + T1**再将 T1 作为已知输入，让 DFlash 从 T2 开始预测。这个对比回答的是：当首位替换的增益有限时，移位是否仍然有效？
+我们从 DFlash 逐步加入三项改动：**DFlash + MTP 首位**只替换第一个候选，观察首位收益；**hidden-only**在此基础上加入 MTP hidden；**hidden + T1**再将 T1 作为已知输入，让 DFlash 从 T2 开始预测，观察移位收益。
 
 <figure><a href="v15-shift-ablation.png" target="_blank" rel="noopener"><img src="v15-shift-ablation.png" alt="Code 128K、Long-horizon 80K 和 MT-Bench 上的 per-verify 接受长度消融，突出 hidden-only 到 hidden + T1 的移位收益"></a></figure>
 
